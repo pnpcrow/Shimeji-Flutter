@@ -159,10 +159,31 @@ class ShimejiApp {
     }
   }
 
-  LanguageBundle _loadLanguageBundle() {
-    // Java loads a ResourceBundle for the current locale; fall back to the
-    // base English bundle.
-    final tag = settings.language.isNotEmpty ? settings.language : '';
+  /// Languages with a translation in conf/ (BCP-47-ish tags).
+  List<String> availableLanguages() {
+    final tags = <String>[];
+    final dir = Directory(confDirectory);
+    if (!dir.existsSync()) return tags;
+    final pattern = RegExp(r'^language_([a-zA-Z_-]+)\.properties\$');
+    for (final file in dir.listSync()) {
+      if (file is! File) continue;
+      final match = pattern.firstMatch(file.path.split(Platform.pathSeparator).last);
+      if (match != null) {
+        tags.add(match.group(1)!.replaceAll('_', '-'));
+      }
+    }
+    tags.sort();
+    return tags;
+  }
+
+  /// Switches the UI language at runtime (tray Language submenu).
+  void setLanguage(String tag) {
+    settings.language = tag;
+    languageBundle = _bundleForTag(tag, fallback: languageBundle);
+    onRefreshUi?.call();
+  }
+
+  LanguageBundle _bundleForTag(String tag, {LanguageBundle? fallback}) {
     if (tag.isNotEmpty) {
       final localized = LanguageBundle.load(
           '$confDirectory/language_${tag.replaceAll('-', '_')}.properties');
@@ -171,7 +192,15 @@ class ShimejiApp {
           '$confDirectory/language_${tag.split('-').first}.properties');
       if (base.containsKey('CallAnother')) return base;
     }
-    return LanguageBundle.load('$confDirectory/language.properties');
+    final defaultBundle = LanguageBundle.load('$confDirectory/language.properties');
+    if (defaultBundle.containsKey('CallAnother')) return defaultBundle;
+    return fallback ?? defaultBundle;
+  }
+
+  LanguageBundle _loadLanguageBundle() {
+    // Java loads a ResourceBundle for the current locale; fall back to the
+    // base English bundle.
+    return _bundleForTag(settings.language);
   }
 
   void _wireHooks() {
@@ -331,6 +360,15 @@ class ShimejiApp {
   // -------------------------------------------------------------------------
   // Mascots
   // -------------------------------------------------------------------------
+
+  /// Human-readable name for a language tag, resolved through its bundle.
+  String languageDisplayName(String tag) {
+    final bundle = LanguageBundle.load(
+        '$confDirectory/language_${tag.replaceAll('-', '_')}.properties');
+    final native = bundle.getString('LanguageName');
+    if (native != 'LanguageName') return native;
+    return tag;
+  }
 
   /// Spawns one more mascot of the given image set (menu "Call Another").
   void createMascot(String imageSet) {
