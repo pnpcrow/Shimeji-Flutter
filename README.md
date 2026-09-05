@@ -65,6 +65,16 @@ build\windows\x64\runner\Release\shimeji_flutter.exe
 - **hqx**: `tool/convert_hqx.py`가 Java 소스를 자동 변환했습니다(`lib/src/image/hqx/`).
   `Filter=hqx` 설정 시 2/3/4배수 스케일에서 사용됩니다.
 
+## 요구사항 감사 결과 (원본 대비 검증)
+
+- 액션 클래스 1:1 대응 확인 (원본 39개 파일 ↔ Dart, deprecated Broadcast*/MoveWithTurn 별칭 포함)
+- settings.properties 키 1:1 대응 확인 (DisabledBehaviours.<set> 동적 키 포함)
+- 스키마 태그/속성명: 영어(en) + 일본어(ja) 매핑 이식
+- hqx(Hq2x) 런타임 검증: `Filter=hqx` + `Scaling=2`로 실제 2배 업스케일 렌더링 확인
+- 설정 플래그(Breeding/Transients/Transformation/Throwing/Sounds/Multiscreen/
+  ShowTrayIcon/AlwaysShowShimejiChooser/AlwaysShowInformationScreen/DrawShimejiBounds/
+  InteractiveWindows[Blacklist]/Language/Opacity/Scaling/Filter) 모두 연결됨
+
 ## 제한 사항 (원본 대비)
 
 - 오버레이는 주 모니터 DPI 기준 가상 화면에 맞춰져 있습니다. 서로 다른 DPI의 다중 모니터
@@ -74,6 +84,9 @@ build\windows\x64\runner\Release\shimeji_flutter.exe
 - `InteractiveWindows` 기능(활성 창 던지기 등)은 설정에 타이틀 문자열을 넣어야 활성화됩니다
   (원본과 동일).
 - X11/macOS 전용 플랫폼 레이어는 미포팅(Windows 우선).
+- 가상 윈도우 모드(`Environment=virtual`, 디버그용 창 에뮬레이션)은 미포팅 — 설정 파일에는
+  값이 그대로 보존됩니다.
+- 트레이 언어 전환은 접속된 language_*.properties 기반(원본은 로캘 라디오 메뉴와 동일 효과).
 
 ## 라이선스
 
