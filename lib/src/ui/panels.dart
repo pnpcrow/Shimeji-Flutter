@@ -4,9 +4,12 @@
 /// transparent overlay window.
 library;
 
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../app.dart';
+import '../config/configuration.dart';
 import '../mascot.dart';
 import 'app_ui_state.dart';
 
@@ -114,12 +117,30 @@ class ImageSetChooser extends StatefulWidget {
 class _ImageSetChooserState extends State<ImageSetChooser> {
   late Future<List<String>> _setsFuture;
   final Set<String> _selected = {};
+  final Map<String, Configuration?> _configurations = {};
 
   @override
   void initState() {
     super.initState();
     _setsFuture = widget.app.availableImageSets();
     _selected.addAll(widget.app.settings.activeImageSets);
+  }
+
+  /// The preview image for a set: the parsed PreviewImage when a
+  /// configuration exists, otherwise shime1.png (original chooser order).
+  File? _previewFor(String set) {
+    final configuration =
+        _configurations[set] ??= widget.app.configurationFor(set);
+    final candidates = <String>[
+      if (configuration?.previewImagePath != null)
+        'img/$set/${configuration!.previewImagePath}',
+      'img/$set/shime1.png',
+    ];
+    for (final candidate in candidates) {
+      final file = File(resolveAppPath(candidate));
+      if (file.existsSync()) return file;
+    }
+    return null;
   }
 
   @override
@@ -160,6 +181,15 @@ class _ImageSetChooserState extends State<ImageSetChooser> {
                             dense: true,
                             value: _selected.contains(set),
                             title: Text(set),
+                            secondary: _previewFor(set) == null
+                                ? null
+                                : Image.file(
+                                    _previewFor(set)!,
+                                    width: 48,
+                                    height: 48,
+                                    fit: BoxFit.contain,
+                                    filterQuality: FilterQuality.none,
+                                  ),
                             onChanged: (value) {
                               setState(() {
                                 if (value == true) {
@@ -411,4 +441,68 @@ class StatsPanel extends StatelessWidget {
 
   dynamic _firstAnchor(Iterable<Mascot> mascots) =>
       mascots.isEmpty ? null : mascots.first.anchor;
+}
+
+/// The information/splash panel (port of InformationWindow): shows each
+/// image set's display name and splash image from its Information tags.
+class InfoPanel extends StatelessWidget {
+  final ShimejiApp app;
+  const InfoPanel({super.key, required this.app});
+
+  @override
+  Widget build(BuildContext context) {
+    final entries = <MapEntry<String, Configuration>>[];
+    for (final set in app.settings.activeImageSets) {
+      final configuration = app.configurationFor(set);
+      if (configuration != null &&
+          (configuration.displayName != null ||
+              configuration.splashImagePath != null)) {
+        entries.add(MapEntry(set, configuration));
+      }
+    }
+
+    return Center(
+      child: Container(
+        width: 420,
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF7F7F7),
+          border: Border.all(color: const Color(0xFF9A9A9A)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (final entry in entries) ...[
+              if (entry.value.splashImagePath != null)
+                Builder(builder: (context) {
+                  final splash = File(resolveAppPath(
+                      'img/${entry.key}/${entry.value.splashImagePath}'));
+                  return splash.existsSync()
+                      ? ConstrainedBox(
+                          constraints: const BoxConstraints(maxHeight: 220),
+                          child: Image.file(splash, fit: BoxFit.contain),
+                        )
+                      : const SizedBox.shrink();
+                }),
+              Text(
+                entry.value.displayName ?? entry.key,
+                style: const TextStyle(
+                    fontSize: 16, fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 10),
+            ],
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton(
+                onPressed: () => AppUiState.instance.closePanels(),
+                child: const Text('OK'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }

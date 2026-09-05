@@ -6,7 +6,7 @@ import 'package:flutter/foundation.dart';
 import '../app.dart';
 import '../mascot.dart' show Mascot;
 
-enum UiMode { none, contextMenu, chooser, settings, stats }
+enum UiMode { none, contextMenu, chooser, settings, stats, info }
 
 /// A context-menu item or separator.
 class MenuItem {
@@ -41,7 +41,8 @@ class AppUiState extends ChangeNotifier {
   double menuTop = 0;
 
   /// Set while the chooser/settings panels cover the overlay.
-  bool get isFullScreenUi => mode == UiMode.chooser || mode == UiMode.settings;
+  bool get isFullScreenUi =>
+      mode == UiMode.chooser || mode == UiMode.settings || mode == UiMode.info;
 
   static AppUiState instance = AppUiState();
 
