@@ -1,0 +1,524 @@
+/// Port of `Main.java` — application bootstrap, configuration loading, mascot
+/// spawning, input polling, and the shared application state.
+library;
+
+import 'dart:async';
+import 'dart:io';
+import 'dart:math' as math;
+
+import 'package:flutter/services.dart';
+import 'package:win32/win32.dart' show GetAsyncKeyState, VK_LBUTTON, VK_RBUTTON;
+import 'package:xml/xml.dart';
+
+import 'action/globals.dart';
+import 'behavior/behavior.dart';
+import 'behavior/behavior_execution_exception.dart';
+import 'config/configuration.dart';
+import 'config/exceptions.dart';
+import 'environment/environment.dart';
+import 'image/mascot_image.dart' show MascotImage;
+import 'environment/win32_environment.dart';
+import 'image/hqx/hqx_scaler.dart';
+import 'image/image_pairs.dart';
+import 'manager.dart';
+import 'mascot.dart';
+import 'overlay/overlay_controller.dart';
+import 'settings.dart';
+import 'sound/sounds.dart';
+
+class ShimejiApp {
+  static final ShimejiApp instance = ShimejiApp._();
+
+  ShimejiApp._();
+
+  late Settings settings;
+  late LanguageBundle languageBundle;
+  final Map<String, Configuration> configurations = {};
+  late final Manager manager = Manager();
+  late final WindowsEnvironment environment = WindowsEnvironment();
+  final math.Random _random = math.Random();
+
+  String appRoot = '';
+  String get confDirectory => '$appRoot/conf';
+  String get imageDirectory => '$appRoot/img';
+  String get soundDirectory => '$appRoot/sound';
+  String get settingsFile => '$confDirectory/settings.properties';
+  String get iconFile => '$appRoot/icon.png';
+
+  /// The configuration for an image set (null if not loaded/failed).
+  Configuration? configurationFor(String imageSet) =>
+      configurations[imageSet];
+
+  /// UI state hooks; assigned by the UI layer.
+  void Function(Mascot mascot, int physicalX, int physicalY)? onShowContextMenu;
+  VoidCallback? onRefreshUi;
+  void Function()? onAppExit;
+
+  // -------------------------------------------------------------------------
+  // Startup
+  // -------------------------------------------------------------------------
+
+  Future<void> run() async {
+    _resolveAppRoot();
+    await _extractAssets();
+
+    settings = Settings();
+    settings.load(settingsFile);
+    Sounds.enabled = settings.sounds;
+
+    languageBundle = _loadLanguageBundle();
+    _wireHooks();
+
+    environment.interactiveWindows = () => settings.interactiveWindows;
+    environment.interactiveWindowsBlacklist = () =>
+        settings.interactiveWindowsBlacklist;
+    MascotEnvironment.multiscreenEnabled = () => settings.multiscreen;
+    ShimejiEnvironmentHolder.instance = environment;
+
+    environment.init();
+
+    // Load active image set configurations.
+    await _configurationLoadLoop();
+
+    manager.onExitOnLastRemoved = exit;
+    manager.start();
+
+    // Spawn one mascot per active image set (Java Main.run).
+    for (final imageSet in settings.activeImageSets) {
+      final configuration = configurations[imageSet];
+      if (configuration == null) continue;
+      _spawnMascot(imageSet, configuration);
+    }
+    onRefreshUi?.call();
+  }
+
+  void _spawnMascot(String imageSet, Configuration configuration) {
+    final mascot = Mascot(imageSet);
+    mascot.onShowPopup = (x, y) {
+      final bounds = mascot.bounds;
+      onShowContextMenu?.call(mascot, bounds.x + x, bounds.y + y);
+    };
+    mascot.anchor.setLocation(-4000, -4000);
+    mascot.lookRight = _random.nextBool();
+    try {
+      final behavior = configuration.buildNextBehavior(null, mascot);
+      mascot.setBehavior(behavior);
+      manager.add(mascot);
+    } on BehaviorInstantiationException catch (e) {
+      _showError('Failed to create a mascot for "$imageSet"', e);
+      mascot.dispose();
+    }
+  }
+
+  void _resolveAppRoot() {
+    try {
+      final exeDir = File(Platform.resolvedExecutable).parent.path;
+      final probe = Directory('$exeDir/.write_probe');
+      probe.createSync(recursive: true);
+      probe.deleteSync();
+      appRoot = exeDir;
+    } catch (_) {
+      final appData =
+          Platform.environment['APPDATA'] ?? Directory.systemTemp.path;
+      appRoot = '$appData/shimeji_flutter';
+      Directory(appRoot).createSync(recursive: true);
+    }
+  }
+
+  /// Extracts bundled conf/ and img/ assets so users can edit them like the
+  /// Java distribution.
+  Future<void> _extractAssets() async {
+    Directory(confDirectory).createSync(recursive: true);
+    Directory(imageDirectory).createSync(recursive: true);
+    try {
+      final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
+      for (final asset in manifest.listAssets()) {
+        if (!asset.startsWith('assets/conf/') &&
+            !asset.startsWith('assets/img/') &&
+            asset != 'assets/icon.png' &&
+            asset != 'assets/icon.ico') {
+          continue;
+        }
+        final relative = asset.substring('assets/'.length);
+        final target = File('$appRoot/$relative');
+        if (target.existsSync()) continue;
+        target.parent.createSync(recursive: true);
+        final data = await rootBundle.load(asset);
+        await target.writeAsBytes(data.buffer.asUint8List(), flush: true);
+      }
+    } catch (e) {
+      // Asset extraction is best-effort; bundled defaults may already exist.
+    }
+    // Extract the tray icon if it was not bundled into the manifest above.
+    final icon = File(iconFile);
+    if (!icon.existsSync()) {
+      try {
+        final data = await rootBundle.load('assets/icon.png');
+        await icon.writeAsBytes(data.buffer.asUint8List(), flush: true);
+      } catch (_) {}
+    }
+  }
+
+  LanguageBundle _loadLanguageBundle() {
+    // Java loads a ResourceBundle for the current locale; fall back to the
+    // base English bundle.
+    final tag = settings.language.isNotEmpty ? settings.language : '';
+    if (tag.isNotEmpty) {
+      final localized = LanguageBundle.load(
+          '$confDirectory/language_${tag.replaceAll('-', '_')}.properties');
+      if (localized.containsKey('CallAnother')) return localized;
+      final base = LanguageBundle.load(
+          '$confDirectory/language_${tag.split('-').first}.properties');
+      if (base.containsKey('CallAnother')) return base;
+    }
+    return LanguageBundle.load('$confDirectory/language.properties');
+  }
+
+  void _wireHooks() {
+    EngineHooks.instance.scaling = () => settings.scaling;
+    EngineHooks.instance.breeding = () => settings.breeding;
+    EngineHooks.instance.transients = () => settings.transients;
+    EngineHooks.instance.transformation = () => settings.transformation;
+    EngineHooks.instance.throwing = () => settings.throwing;
+    EngineHooks.instance.multiscreen = () => settings.multiscreen;
+    EngineHooks.instance.configuration = configurationFor;
+    EngineHooks.instance.disabledBehaviorsFor =
+        (imageSet) => settings.disabledBehaviors[imageSet];
+    EngineHooks.instance.showError = _showError;
+    EngineHooks.instance.manager = () => manager;
+    ConfigurationForHook = configurationFor;
+    ShowErrorHook = _showError;
+    resolveAppPath = (path) {
+      if (path.startsWith('/')) return '$appRoot$path';
+      return '$appRoot/$path';
+    };
+    ImagePairs.hqxScaler = applyHqx;
+    ImagePairs.resolveImagePath = (path) {
+      if (path.startsWith('/')) return '$imageDirectory$path';
+      return '$imageDirectory/$path';
+    };
+  }
+
+  // -------------------------------------------------------------------------
+  // Configuration loading
+  // -------------------------------------------------------------------------
+
+  static const List<String> _actionsNames = [
+    'actions.xml', '動作.xml', 'one.xml', '1.xml',
+  ];
+  static const List<String> _behaviorsNames = [
+    'behaviors.xml', 'behavior.xml', '行動.xml', 'two.xml', '2.xml',
+  ];
+
+  /// Searches img/<set>/conf/, conf/<set>/ and conf/ like the Java original.
+  List<String> _configCandidates(String imageSet, List<String> filenames) {
+    return [
+      for (final dir in ['img/$imageSet/conf', 'conf/$imageSet', 'conf'])
+        for (final name in filenames) '$dir/$name',
+    ];
+  }
+
+  String? _findConfigFile(String imageSet, List<String> filenames) {
+    for (final candidate in _configCandidates(imageSet, filenames)) {
+      final file = File(resolveAppPath(candidate));
+      if (file.existsSync()) return file.path;
+    }
+    return null;
+  }
+
+  Future<Configuration?> loadConfiguration(String imageSet,
+      {Set<String>? loading}) async {
+    if (configurations.containsKey(imageSet)) return configurations[imageSet];
+    loading ??= <String>{};
+    if (!loading.add(imageSet)) return null;
+
+    final actionsPath = _findConfigFile(imageSet, _actionsNames);
+    final behaviorsPath = _findConfigFile(imageSet, _behaviorsNames);
+    if (actionsPath == null) {
+      return null;
+    }
+
+    final configuration = Configuration();
+    configuration.settings = settings;
+    try {
+      final actionsXml =
+          XmlDocument.parse(await File(actionsPath).readAsString());
+      configuration.load(actionsXml.rootElement, imageSet);
+      if (behaviorsPath != null) {
+        final behaviorsXml =
+            XmlDocument.parse(await File(behaviorsPath).readAsString());
+        configuration.load(behaviorsXml.rootElement, imageSet);
+      }
+    } catch (e) {
+      _showError('Failed to load the configuration for "$imageSet"', e);
+      return null;
+    }
+
+    // Load referenced child image sets (BornMascot / TransformMascot).
+    final referenced = <String>{};
+    for (final actionBuilder in configuration.actionBuilders.values) {
+      for (final key in const ['BornMascot', 'TransformMascot']) {
+        final value = actionBuilder.params[key];
+        if (value != null && value.isNotEmpty && !value.contains('{')) {
+          referenced.add(value);
+        }
+      }
+    }
+    for (final child in referenced) {
+      if (child != imageSet) {
+        await loadConfiguration(child, loading: loading);
+      }
+    }
+
+    try {
+      await configuration.loadPoseImages();
+      configuration.validate();
+    } catch (e) {
+      _showError('Failed to load the configuration for "$imageSet"', e);
+      return null;
+    }
+
+    configurations[imageSet] = configuration;
+    return configuration;
+  }
+
+  Future<void> _configurationLoadLoop() async {
+    if (!settings.alwaysShowShimejiChooser && settings.activeImageSets.isEmpty) {
+      // First launch: auto-select every image set with a valid config.
+      settings.activeImageSets.addAll(await availableImageSets());
+    }
+    final valid = <String>[];
+    for (final imageSet in settings.activeImageSets) {
+      final configuration = await loadConfiguration(imageSet);
+      if (configuration != null) valid.add(imageSet);
+    }
+    settings.activeImageSets
+      ..clear()
+      ..addAll(valid);
+    _saveSettings();
+  }
+
+  /// Image set directories under img/ that contain at least one PNG frame.
+  Future<List<String>> availableImageSets() async {
+    final result = <String>[];
+    final dir = Directory(imageDirectory);
+    if (!dir.existsSync()) return result;
+    for (final entry in dir.listSync()) {
+      if (entry is Directory) {
+        final name = entry.path.split(Platform.pathSeparator).last;
+        if (name == 'unused') continue;
+        if (configurations.containsKey(name)) {
+          result.add(name);
+          continue;
+        }
+        final hasPng = entry
+            .listSync()
+            .whereType<File>()
+            .any((f) => f.path.toLowerCase().endsWith('.png'));
+        if (hasPng) result.add(name);
+      }
+    }
+    result.sort();
+    return result;
+  }
+
+  void _saveSettings() {
+    try {
+      settings.save(settingsFile);
+    } catch (_) {}
+  }
+
+  // -------------------------------------------------------------------------
+  // Mascots
+  // -------------------------------------------------------------------------
+
+  /// Spawns one more mascot of the given image set (menu "Call Another").
+  void createMascot(String imageSet) {
+    final configuration = configurationFor(imageSet);
+    if (configuration == null) return;
+    _spawnMascot(imageSet, configuration);
+  }
+
+  /// Menu "Choose Shimeji": switches to the given list of image sets.
+  Future<void> switchImageSets(List<String> imageSets) async {
+    manager.disposeAll();
+    configurations.clear();
+    settings.activeImageSets
+      ..clear()
+      ..addAll(imageSets);
+    for (final imageSet in imageSets) {
+      await loadConfiguration(imageSet);
+    }
+    _saveSettings();
+    for (final imageSet in settings.activeImageSets) {
+      final configuration = configurations[imageSet];
+      if (configuration == null) continue;
+      _spawnMascot(imageSet, configuration);
+    }
+    onRefreshUi?.call();
+  }
+
+  void _showError(String message, [Object? error]) {
+    // The Java original shows a Swing error dialog; log to the console and
+    // keep the app alive.
+    // ignore: avoid_print
+    print('Shimeji error: $message${error == null ? '' : ' ($error)'}');
+  }
+
+  // -------------------------------------------------------------------------
+  // Exit
+  // -------------------------------------------------------------------------
+
+  void exit() {
+    _saveSettings();
+    manager.stop();
+    Sounds.dispose();
+    onAppExit?.call();
+  }
+
+  // -------------------------------------------------------------------------
+  // Input (polled; mirrors the Java mouse event flow)
+  // -------------------------------------------------------------------------
+
+  bool _lastLeftDown = false;
+  bool _lastRightDown = false;
+  Mascot? _dragMascot;
+
+  /// Runs once per engine tick before the mascots tick.
+  void pollInput() {
+    final cursor = environment.getCursor();
+    final leftDown =
+        (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0; // VK_LBUTTON
+    final rightDown =
+        (GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0; // VK_RBUTTON
+
+    final mascotAtCursor = _mascotAt(cursor.x, cursor.y);
+
+    if (leftDown && !_lastLeftDown) {
+      // Left press: hotspot handling happens inside the behavior.
+      if (mascotAtCursor != null) {
+        final bounds = mascotAtCursor.bounds;
+        _dragMascot = mascotAtCursor;
+        try {
+          mascotAtCursor.mousePressed(false, cursor.x - bounds.x,
+              cursor.y - bounds.y);
+        } on BehaviorExecutionException {
+          // Mascot disposed inside the handler.
+        }
+      }
+    } else if (!leftDown && _lastLeftDown) {
+      final mascot = _dragMascot;
+      if (mascot != null) {
+        _dragMascot = null;
+        try {
+          final bounds = mascot.bounds;
+          mascot.mouseReleased(false, cursor.x - bounds.x, cursor.y - bounds.y);
+        } on BehaviorExecutionException {
+          // Disposed.
+        }
+      }
+    }
+
+    if (rightDown && !_lastRightDown) {
+      // SHIMEJI_DEBUG_MENU=1 opens the first mascot's menu on any right
+      // click; a testing aid for environments where the mascots keep moving.
+      final debugMenu = Platform.environment['SHIMEJI_DEBUG_MENU'] == '1';
+      if (mascotAtCursor != null && _dragMascot == null) {
+        final bounds = mascotAtCursor.bounds;
+        mascotAtCursor.mousePressed(
+            true, cursor.x - bounds.x, cursor.y - bounds.y);
+      } else if (debugMenu && manager.mascots.isNotEmpty) {
+        final first = manager.mascots.first;
+        first.showPopup(cursor.x - first.bounds.x, cursor.y - first.bounds.y);
+      }
+    }
+
+    _lastLeftDown = leftDown;
+    _lastRightDown = rightDown;
+  }
+
+  Mascot? _mascotAt(int physicalX, int physicalY) {
+    final mascots = manager.mascots;
+    for (var i = mascots.length - 1; i >= 0; i--) {
+      final mascot = mascots.elementAt(i);
+      if (mascot.image == null) continue;
+      final bounds = mascot.bounds;
+      if (physicalX >= bounds.x &&
+          physicalX < bounds.x + bounds.width &&
+          physicalY >= bounds.y &&
+          physicalY < bounds.y + bounds.height) {
+        final localX = physicalX - bounds.x;
+        final localY = physicalY - bounds.y;
+        if (mascot.image!.hitTest(localX, localY)) {
+          return mascot;
+        }
+      }
+    }
+    return null;
+  }
+
+  // -------------------------------------------------------------------------
+  // Overlay synchronization
+  // -------------------------------------------------------------------------
+
+  final List<int> _lastRectSignature = [];
+
+  /// Pushes hit rects to the runner when the mascot layout changed.
+  Future<void> updateOverlayRects() async {
+    final rects = <HitRect>[];
+    final signature = <int>[];
+    for (final mascot in manager.mascots) {
+      final image = mascot.image;
+      if (image == null) continue;
+      final bounds = mascot.bounds;
+      signature
+        .addAll([bounds.x, bounds.y, bounds.width, bounds.height, image.width]);
+      rects.add(_hitRectFor(mascot));
+    }
+    if (_listEquals(signature, _lastRectSignature)) return;
+    _lastRectSignature
+      ..clear()
+      ..addAll(signature);
+    await OverlayController.setHitRects(rects);
+  }
+
+  HitRect _hitRectFor(Mascot mascot) {
+    final image = mascot.image!;
+    final bounds = mascot.bounds;
+    final cols = image.maskCols;
+    final rows = image.maskRows;
+    final maskBits = <int>[];
+    var current = 0;
+    var bitIndex = 0;
+    for (var i = 0; i < cols * rows; i++) {
+      if (i < image.alphaMask.length && image.alphaMask[i]) {
+        current |= 1 << (bitIndex % 32);
+      }
+      bitIndex++;
+      if (bitIndex % 32 == 0) {
+        maskBits.add(current);
+        current = 0;
+      }
+    }
+    if (bitIndex % 32 != 0) maskBits.add(current);
+    return HitRect(
+      x: bounds.x,
+      y: bounds.y,
+      width: bounds.width,
+      height: bounds.height,
+      maskCols: cols,
+      maskRows: rows,
+      cellSize: MascotImage.maskCellSize,
+      maskBits: maskBits,
+    );
+  }
+
+  static bool _listEquals(List<int> a, List<int> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
+}
+
