@@ -16,7 +16,6 @@ import 'manager.dart';
 import 'script/script_object.dart';
 import 'sound/sounds.dart';
 
-export 'behavior/user_behavior.dart' show userBehaviorNames;
 export 'environment/environment.dart'
     show AreaScriptObject, BorderScriptObject, ScriptPointObject;
 
@@ -41,6 +40,9 @@ class Mascot {
   final List<String> affordances = [];
   final List<Hotspot> hotspots = [];
   JPoint? cursor; // cursor position in window-local coordinates
+
+  /// Per-mascot script scratch space (Java Mascot.getVariables()).
+  final Map<String, Object?> variables = {};
 
   /// Hooked by the overlay UI layer to open the mascot context menu.
   void Function(int x, int y)? onShowPopup;
