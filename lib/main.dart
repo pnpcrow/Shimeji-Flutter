@@ -110,6 +110,11 @@ class _OverlayViewState extends State<OverlayView> {
     if (app.settings.alwaysShowShimejiChooser ||
         app.settings.activeImageSets.isEmpty) {
       AppUiState.instance.show(UiMode.chooser);
+    } else if (app.settings.alwaysShowInformationScreen &&
+        app.settings.activeImageSets.any((set) =>
+            app.configurationFor(set)?.splashImagePath != null ||
+            app.configurationFor(set)?.displayName != null)) {
+      AppUiState.instance.show(UiMode.info);
     }
 
     _ticker = Timer.periodic(
@@ -360,6 +365,7 @@ class _OverlayViewState extends State<OverlayView> {
                 ),
               if (state.mode == UiMode.chooser) ImageSetChooser(app: app),
               if (state.mode == UiMode.settings) SettingsPanel(app: app),
+              if (state.mode == UiMode.info) InfoPanel(app: app),
               if (state.mode == UiMode.stats) StatsPanel(app: app),
             ],
           );
