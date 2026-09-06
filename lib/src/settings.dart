@@ -32,6 +32,10 @@ class Settings {
   List<String> interactiveWindows = [];
   List<String> interactiveWindowsBlacklist = [];
 
+  /// The screen presentation mode. 'legacy' renders each mascot in its own
+  /// per-pixel-alpha native window (the original Java architecture).
+  String renderingMode = 'legacy';
+
   // Window mode settings (the virtual "windowed" environment is not ported;
   // kept so settings files round-trip losslessly).
   bool windowedMode = false;
@@ -98,6 +102,8 @@ class Settings {
     interactiveWindows = getStringList('InteractiveWindows', '/');
     interactiveWindowsBlacklist =
         getStringList('InteractiveWindowsBlacklist', '/');
+    final mode = getProperty('RenderingMode', 'legacy').trim().toLowerCase();
+    renderingMode = mode == 'legacy' ? 'legacy' : 'legacy';
 
     windowedMode = getProperty('Environment', 'generic') == 'virtual';
     final windowSize = getProperty('WindowSize', '600x500').split('x');
@@ -173,6 +179,7 @@ class Settings {
     set('Scaling', scaling.toString());
     set('InteractiveWindows', interactiveWindows.join('/'));
     set('InteractiveWindowsBlacklist', interactiveWindowsBlacklist.join('/'));
+    set('RenderingMode', renderingMode);
     set('Environment', windowedMode ? 'virtual' : 'generic');
     set('WindowSize', '$windowWidth x $windowHeight'.replaceAll(' ', ''));
     set('Background',
