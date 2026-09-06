@@ -17,6 +17,18 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   // plugins.
   ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 
+  // Single instance, like the original launch4j mutex: a second launch must
+  // not stack a second set of mascot windows.
+  HANDLE instance_mutex =
+      ::CreateMutexW(nullptr, TRUE, L"ShimejiFlutterSingleInstance");
+  if (instance_mutex == nullptr ||
+      ::GetLastError() == ERROR_ALREADY_EXISTS) {
+    if (instance_mutex != nullptr) {
+      ::CloseHandle(instance_mutex);
+    }
+    return EXIT_FAILURE;
+  }
+
   flutter::DartProject project(L"data");
 
   std::vector<std::string> command_line_arguments =
@@ -48,5 +60,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   }
 
   ::CoUninitialize();
+  if (instance_mutex != nullptr) {
+    ::CloseHandle(instance_mutex);
+  }
   return EXIT_SUCCESS;
 }

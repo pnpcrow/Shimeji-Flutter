@@ -27,16 +27,26 @@ class FlutterWindow : public Win32Window {
   // Registers the mascot window management channel.
   void RegisterMascotChannel();
 
+  // Settings-screen host window management: reveals the (normally hidden)
+  // host window as a regular dialog-sized window, and hides it again.
+  void ShowSettingsWindow(int width, int height);
+  void HideSettingsWindow();
+
+  bool settings_visible() const { return settings_visible_; }
+
   // The project to run.
   flutter::DartProject project_;
 
   // The Flutter instance hosted by this window.
   std::unique_ptr<flutter::FlutterViewController> flutter_controller_;
 
-  // The overlay control channel.
+  // The mascot/control channel.
   std::unique_ptr<
       flutter::MethodChannel<flutter::EncodableValue>>
       channel_;
+
+  // Whether the host window currently displays the settings screen.
+  bool settings_visible_ = false;
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_

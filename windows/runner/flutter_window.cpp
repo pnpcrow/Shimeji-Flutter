@@ -112,6 +112,20 @@ void FlutterWindow::RegisterMascotChannel() {
           result->Success();
           return;
         }
+        if (method_name == "showSettingsWindow") {
+          int width = GetInt(map, "width");
+          int height = GetInt(map, "height");
+          if (width <= 0) width = 980;
+          if (height <= 0) height = 720;
+          ShowSettingsWindow(width, height);
+          result->Success();
+          return;
+        }
+        if (method_name == "hideSettingsWindow") {
+          HideSettingsWindow();
+          result->Success();
+          return;
+        }
         if (method_name == "showContextMenu") {
           int id = GetInt(map, "id");
           int x = GetInt(map, "x");
@@ -159,6 +173,48 @@ void FlutterWindow::RegisterMascotChannel() {
       });
 }
 
+void FlutterWindow::ShowSettingsWindow(int width, int height) {
+  settings_visible_ = true;
+  HWND hwnd = GetHandle();
+
+  LONG_PTR style = GetWindowLongPtr(hwnd, GWL_STYLE);
+  style &= ~WS_POPUP;
+  style |= WS_OVERLAPPEDWINDOW | WS_VISIBLE;
+  SetWindowLongPtr(hwnd, GWL_STYLE, style);
+  LONG_PTR ex_style = GetWindowLongPtr(hwnd, GWL_EXSTYLE);
+  ex_style &= ~(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST);
+  SetWindowLongPtr(hwnd, GWL_EXSTYLE, ex_style);
+
+  const int screen_w = GetSystemMetrics(SM_CXSCREEN);
+  const int screen_h = GetSystemMetrics(SM_CYSCREEN);
+  SetWindowPos(hwnd, HWND_TOP, (screen_w - width) / 2,
+               (screen_h - height) / 2, width, height,
+               SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+  ShowWindow(hwnd, SW_SHOW);
+  SetForegroundWindow(hwnd);
+}
+
+void FlutterWindow::HideSettingsWindow() {
+  settings_visible_ = false;
+  HWND hwnd = GetHandle();
+  ShowWindow(hwnd, SW_HIDE);
+
+  LONG_PTR style = GetWindowLongPtr(hwnd, GWL_STYLE);
+  style &= ~WS_OVERLAPPEDWINDOW;
+  style |= WS_POPUP;
+  SetWindowLongPtr(hwnd, GWL_STYLE, style);
+  LONG_PTR ex_style = GetWindowLongPtr(hwnd, GWL_EXSTYLE);
+  ex_style |= WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST;
+  SetWindowLongPtr(hwnd, GWL_EXSTYLE, ex_style);
+
+  const int vs_x = GetSystemMetrics(SM_XVIRTUALSCREEN);
+  const int vs_y = GetSystemMetrics(SM_YVIRTUALSCREEN);
+  const int vs_w = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+  const int vs_h = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+  SetWindowPos(hwnd, HWND_TOPMOST, vs_x, vs_y, vs_w, vs_h,
+               SWP_NOACTIVATE | SWP_FRAMECHANGED);
+}
+
 void FlutterWindow::OnDestroy() {
   MascotWindows::Instance().DestroyAll();
   if (flutter_controller_) {
@@ -184,6 +240,17 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   }
 
   switch (message) {
+    case WM_CLOSE:
+      // The host window doubles as the settings dialog. Closing it hides it
+      // again instead of tearing down the engine.
+      if (settings_visible_) {
+        HideSettingsWindow();
+        if (channel_) {
+          channel_->InvokeMethod("settingsClosed", nullptr);
+        }
+        return 0;
+      }
+      break;
     case WM_FONTCHANGE:
       flutter_controller_->engine()->ReloadSystemFonts();
       break;
