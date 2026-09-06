@@ -18,8 +18,10 @@ class MascotWindows {
  public:
   struct MenuItem {
     std::wstring label;
+    std::string id;  // stable identifier echoed back on selection
     bool checked = false;
     bool separator = false;
+    int native_command_id = 0;  // assigned during menu construction
     // When set, this item opens a nested popup containing |children|.
     std::shared_ptr<std::vector<MenuItem>> children;
   };
@@ -35,11 +37,12 @@ class MascotWindows {
   void DestroyAll();
   bool Exists(int id) const;
 
-  // Shows a popup menu at physical screen (x, y) and returns the selected
-  // item index, or -1 when dismissed. Items with |checked| show a checkmark;
-  // |separator| items render as separators.
-  int ShowContextMenu(int id, int x, int y,
-                      const std::vector<MenuItem>& items);
+  // Shows a popup menu at physical screen (x, y) and returns the |id| of the
+  // selected item, or an empty string when dismissed. Items with |checked|
+  // show a checkmark; |separator| items render as separators. Nested
+  // |children| become submenus.
+  std::wstring ShowContextMenu(int id, int x, int y,
+                               std::vector<MenuItem>& items);
 
  private:
   MascotWindows() = default;
@@ -48,9 +51,9 @@ class MascotWindows {
                                   LPARAM lparam);
   void EnsureClass();
 
-  // Recursively appends |items| to |menu|. Selectable entries get sequential
-  // command ids so the returned id maps back to a flat index.
-  void AppendItems(HMENU menu, const std::vector<MenuItem>& items,
+  // Recursively appends |items| to |menu|, assigning sequential command ids
+  // and recording them in each item's native_command_id.
+  void AppendItems(HMENU menu, std::vector<MenuItem>& items,
                    int* next_command_id);
 
   std::map<int, HWND> windows_;

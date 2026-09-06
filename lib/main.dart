@@ -72,14 +72,15 @@ Future<void> _runEngine() async {
     mascot.animating = false;
     try {
       final entries = buildContextMenu(app, mascot);
-      final selected = await MascotNativeWindows.showContextMenu(
+      final selectedId = await MascotNativeWindows.showContextMenu(
         id: mascot.id,
         x: physicalX,
         y: physicalY,
         items: entries,
       );
-      if (selected >= 0 && selected < mascot.contextMenuActions.length) {
-        mascot.contextMenuActions[selected]();
+      final action = mascot.contextMenuActionFor(selectedId);
+      if (action != null) {
+        action();
       }
     } finally {
       mascot.animating = true;

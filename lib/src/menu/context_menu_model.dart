@@ -94,23 +94,40 @@ class _ActionEntry {
   _ActionEntry(this.entry, this.action);
 }
 
-/// Mutable builder shared while assembling the menu: keeps the flat list of
-/// actions aligned with the native depth-first selectable numbering.
+/// Builds a labeled entry for a group child (id assigned by the builder).
+NativeMenuEntry _label(String text) =>
+    NativeMenuEntry.label(text, id: 'group-child');
+
+/// Mutable builder: assigns each selectable item a unique id, registers its
+/// action in a map keyed by that id, and records the nested entries.
 class _MenuBuilder {
   final entries = <NativeMenuEntry>[];
-  final actions = <void Function()>[];
+  final actions = <String, void Function()>{};
+  int _nextId = 1;
 
-  void addItem(NativeMenuEntry entry, void Function() action) {
-    entries.add(entry);
-    actions.add(action);
+  String _nextActionId() => 'm${_nextId++}';
+
+  void addItem(String label, void Function() action, {bool checked = false}) {
+    final id = _nextActionId();
+    entries.add(NativeMenuEntry.label(label, id: id, checked: checked));
+    actions[id] = action;
   }
 
   void addSeparator() => entries.add(const NativeMenuEntry.separator());
 
   void addSubmenu(String label, List<_ActionEntry> children) {
-    entries.add(NativeMenuEntry.submenu(label,
-        [for (final child in children) child.entry]));
-    actions.addAll([for (final child in children) child.action]);
+    final id = _nextActionId();
+    // Re-key each child with a unique id so their actions cannot collide.
+    final wired = <NativeMenuEntry>[];
+    for (final child in children) {
+      final childId = _nextActionId();
+      wired.add(NativeMenuEntry.label(
+          child.entry.label ?? '',
+          id: childId,
+          checked: child.entry.checked));
+      actions[childId] = child.action;
+    }
+    entries.add(NativeMenuEntry.submenu(label, wired, id: id));
   }
 }
 
@@ -121,20 +138,17 @@ List<NativeMenuEntry> buildContextMenu(ShimejiApp app, dynamic mascot) {
   final configuration = app.configurationFor(mascot.imageSet as String);
   final builder = _MenuBuilder();
 
-  builder.addItem(NativeMenuEntry.label(lang.getString('CallAnother')),
+  builder.addItem(lang.getString('CallAnother'),
       () => app.createMascot(mascot.imageSet as String));
   builder.addSeparator();
-  builder.addItem(
-    NativeMenuEntry.label(lang.getString('FollowCursor')),
-    () {
-      final configuration = app.configurationFor(mascot.imageSet as String);
-      if (configuration != null) {
-        app.manager.setBehaviorAllFor(
-            configuration, 'ChaseMouse', mascot.imageSet as String);
-      }
-    },
-  );
-  builder.addItem(NativeMenuEntry.label(lang.getString('RestoreWindows')),
+  builder.addItem(lang.getString('FollowCursor'), () {
+    final configuration = app.configurationFor(mascot.imageSet as String);
+    if (configuration != null) {
+      app.manager
+          .setBehaviorAllFor(configuration, 'ChaseMouse', mascot.imageSet);
+    }
+  });
+  builder.addItem(lang.getString('RestoreWindows'),
       () => mascot.environment.restoreIE());
 
   if (configuration != null) {
@@ -148,7 +162,7 @@ List<NativeMenuEntry> buildContextMenu(ShimejiApp app, dynamic mascot) {
       final displayName = lang.containsKey(behaviorName)
           ? lang.getString(behaviorName)
           : splitCamelCase(behaviorName);
-      builder.addItem(NativeMenuEntry.label(displayName), () {
+      builder.addItem(displayName, () {
         try {
           mascot.setBehavior(configuration.buildBehavior(behaviorName));
         } catch (_) {}
@@ -167,14 +181,11 @@ List<NativeMenuEntry> buildContextMenu(ShimejiApp app, dynamic mascot) {
           : splitCamelCase(behaviorName);
       final group = _groupFor(behaviorName);
       groups.putIfAbsent(group, () => []);
-      groups[group]!.add(_ActionEntry(
-        NativeMenuEntry.label(displayName),
-        () {
-          try {
-            mascot.setBehavior(configuration.buildBehavior(behaviorName));
-          } catch (_) {}
-        },
-      ));
+      groups[group]!.add(_ActionEntry(_label(displayName), () {
+        try {
+          mascot.setBehavior(configuration.buildBehavior(behaviorName));
+        } catch (_) {}
+      }));
     }
     builder.addSeparator();
     for (final groupKey in _groupOrder) {
@@ -186,25 +197,21 @@ List<NativeMenuEntry> buildContextMenu(ShimejiApp app, dynamic mascot) {
 
   builder.addSeparator();
   builder.addItem(
-    NativeMenuEntry.label(mascot.paused
-        ? lang.getString('ResumeAnimations')
-        : lang.getString('PauseAnimations')),
-    () => mascot.paused = !(mascot.paused as bool),
-  );
+      mascot.paused
+          ? lang.getString('ResumeAnimations')
+          : lang.getString('PauseAnimations'),
+      () => mascot.paused = !(mascot.paused as bool));
   builder.addSeparator();
-  builder.addItem(NativeMenuEntry.label(lang.getString('Dismiss')),
-      () => mascot.dispose());
-  builder.addItem(NativeMenuEntry.label(lang.getString('DismissOthers')),
-      () => app.manager.remainOneImageSetExcept(mascot.imageSet as String, mascot));
-  builder.addItem(NativeMenuEntry.label(lang.getString('DismissAllOthers')),
+  builder.addItem(lang.getString('Dismiss'), () => mascot.dispose());
+  builder.addItem(lang.getString('DismissOthers'),
+      () => app.manager.remainOneImageSetExcept(mascot.imageSet, mascot));
+  builder.addItem(lang.getString('DismissAllOthers'),
       () => app.manager.remainOneMascot(mascot));
-  builder.addItem(NativeMenuEntry.label(lang.getString('DismissAll')),
-      () => app.exit());
+  builder.addItem(lang.getString('DismissAll'), () => app.exit());
 
   builder.addSeparator();
   if (app.onOpenSettings != null) {
-    builder.addItem(NativeMenuEntry.label(lang.getString('Settings')),
-        () => app.onOpenSettings!());
+    builder.addItem(lang.getString('Settings'), () => app.onOpenSettings!());
   }
 
   // The native layer numbers selectable entries depth-first; register the

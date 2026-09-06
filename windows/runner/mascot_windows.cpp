@@ -149,21 +149,19 @@ HWND EnsureMenuHelperWindow() {
   return helper;
 }
 
-int MascotWindows::ShowContextMenu(int id, int x, int y,
-                                   const std::vector<MenuItem>& items) {
+std::wstring MascotWindows::ShowContextMenu(
+    int id, int x, int y, std::vector<MenuItem>& items) {
   auto it = windows_.find(id);
   if (it == windows_.end()) {
-    return -1;
+    return std::wstring();
   }
   HMENU menu = CreatePopupMenu();
   if (!menu) {
-    return -1;
+    return std::wstring();
   }
   int command_id = 1;
   AppendItems(menu, items, &command_id);
 
-  // TPM_RETURNCMD returns the chosen command id instead of posting
-  // WM_COMMAND; TPM_NOACTIVATE keeps the mascot from stealing focus.
 #ifndef TPM_NOACTIVATE
 #define TPM_NOACTIVATE 0x0100L
 #endif
@@ -182,8 +180,7 @@ int MascotWindows::ShowContextMenu(int id, int x, int y,
   SetForegroundWindow(helper);
   SetActiveWindow(helper);
   int selected = TrackPopupMenuEx(menu,
-                                  TPM_RETURNCMD | TPM_RIGHTBUTTON |
-                                      TPM_NONOTIFY,
+                                  TPM_RETURNCMD | TPM_NONOTIFY,
                                   x, y, helper, nullptr);
   if (foreground != nullptr && foreground_thread != 0 &&
       foreground_thread != this_thread) {
@@ -193,37 +190,34 @@ int MascotWindows::ShowContextMenu(int id, int x, int y,
   }
   DestroyMenu(menu);
 
-  if (selected == 0) {
-    return -1;
-  }
-  // Map the command id back to the index in the original item list (separators
-  // are not selectable, so command ids only count selectable items).
-  int selectable_index = -1;
-  int current_id = 1;
-  for (size_t i = 0; i < items.size(); i++) {
-    if (items[i].separator) {
+  // Resolve the selected command id back to its stable item id.
+  for (const MenuItem& item : items) {
+    if (item.separator) {
       continue;
     }
-    if (current_id == selected) {
-      selectable_index = static_cast<int>(i);
-      break;
+    if (item.native_command_id == selected) {
+      return Utf8ToWide(item.id);
     }
-    current_id++;
+    if (!item.children) {
+      continue;
+    }
+    for (const MenuItem& child : *item.children) {
+      if (child.native_command_id == selected) {
+        return Utf8ToWide(child.id);
+      }
+    }
   }
-  return selectable_index;
+  return std::wstring();
 }
 
-void MascotWindows::AppendItems(HMENU menu, const std::vector<MenuItem>& items,
+void MascotWindows::AppendItems(HMENU menu, std::vector<MenuItem>& items,
                                 int* next_command_id) {
-  for (const MenuItem& item : items) {
+  for (MenuItem& item : items) {
     if (item.separator) {
       AppendMenu(menu, MF_SEPARATOR, 0, nullptr);
       continue;
     }
-    UINT flags = MF_STRING | (item.checked ? MF_CHECKED : 0);
     if (item.children != nullptr) {
-      // Nested popup: the item opens a child menu instead of returning a
-      // command id, so it does not consume a command id.
       HMENU child = CreatePopupMenu();
       if (!child) {
         continue;
@@ -233,7 +227,9 @@ void MascotWindows::AppendItems(HMENU menu, const std::vector<MenuItem>& items,
                  item.label.c_str());
       continue;
     }
+    UINT flags = MF_STRING | (item.checked ? MF_CHECKED : 0);
     AppendMenu(menu, flags, *next_command_id, item.label.c_str());
+    item.native_command_id = *next_command_id;
     (*next_command_id)++;
   }
 }

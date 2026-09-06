@@ -229,9 +229,14 @@ void FlutterWindow::RegisterMascotChannel() {
               }
             }
           }
-          int selected =
+          std::wstring selected =
               MascotWindows::Instance().ShowContextMenu(id, x, y, items);
-          result->Success(EncodableValue(selected));
+          std::string selected_utf8;
+          selected_utf8.reserve(selected.size());
+          for (wchar_t wc : selected) {
+            selected_utf8.push_back(static_cast<char>(wc));
+          }
+          result->Success(EncodableValue(selected_utf8));
           return;
         }
         result->NotImplemented();

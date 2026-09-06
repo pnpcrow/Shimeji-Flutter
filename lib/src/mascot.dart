@@ -44,9 +44,13 @@ class Mascot {
   /// Per-mascot script scratch space (Java Mascot.getVariables()).
   final Map<String, Object?> variables = {};
 
-  /// Actions for the current native context menu, positional to the entries
-  /// built by `buildContextMenu`.
-  List<void Function()> contextMenuActions = [];
+  /// Actions for the current native context menu, keyed by the stable item
+  /// id the native layer echoes back on selection.
+  final Map<String, void Function()> contextMenuActions = {};
+
+  /// Resolves the action for a selected menu item id.
+  void Function()? contextMenuActionFor(String id) =>
+      contextMenuActions[id];
 
   /// Hooked by the overlay UI layer to open the mascot context menu.
   void Function(int x, int y)? onShowPopup;

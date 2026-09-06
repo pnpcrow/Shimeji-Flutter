@@ -17,18 +17,24 @@ class NativeMenuEntry {
   final bool checked;
   final bool separator;
 
+  /// Stable identifier echoed back by the native side when this entry is
+  /// chosen. Position-independent, so separators/submenus cannot shift it.
+  final String id;
+
   /// Nested popup entries; non-null turns this item into a submenu.
   final List<NativeMenuEntry>? children;
 
-  const NativeMenuEntry.label(this.label, {this.checked = false})
+  const NativeMenuEntry.label(this.label,
+      {required this.id, this.checked = false})
       : separator = false,
         children = null;
   const NativeMenuEntry.separator()
       : label = null,
         checked = false,
         separator = true,
+        id = '',
         children = null;
-  const NativeMenuEntry.submenu(this.label, this.children)
+  const NativeMenuEntry.submenu(this.label, this.children, {required this.id})
       : checked = false,
         separator = false;
 }
@@ -54,31 +60,32 @@ class MascotNativeWindows {
     if (item.children != null) {
       return {
         'label': item.label!,
+        'id': item.id,
         'children': [for (final child in item.children!) _encodeItem(child)],
       };
     }
-    return {'label': item.label!, 'checked': item.checked};
+    return {'label': item.label!, 'id': item.id, 'checked': item.checked};
   }
 
   /// Opens a native popup menu for the mascot window [id] at physical screen
   /// position ([x], [y]). Returns the index into [items] of the chosen entry,
   /// or -1 when the menu was dismissed.
-  static Future<int> showContextMenu({
+  static Future<String> showContextMenu({
     required int id,
     required int x,
     required int y,
     required List<NativeMenuEntry> items,
   }) async {
     try {
-      final result = await _channel.invokeMethod<int>('showContextMenu', {
+      final result = await _channel.invokeMethod<String>('showContextMenu', {
         'id': id,
         'x': x,
         'y': y,
         'items': [for (final item in items) _encodeItem(item)],
       });
-      return result ?? -1;
+      return result ?? '';
     } on PlatformException {
-      return -1;
+      return '';
     }
   }
 
