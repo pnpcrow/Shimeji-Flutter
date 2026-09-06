@@ -214,22 +214,45 @@ Future<void> _setupTray() async {
       tray.popUpContextMenu();
     }
   });
-  await _buildTrayMenu(tray);
+  await _rebuildTrayMenu();
 }
 
-Future<void> _rebuildTrayMenu() async {
-  // ignore: avoid_print
-  print('TRAY rebuild requested');
+/// The system_tray plugin keeps mutable per-Menu state (menu id, item id
+/// counter, item list) and silently drops click callbacks while a menu
+/// build is in flight. Overlapping rebuilds therefore corrupt the menu
+/// (a language change fires several broadcasts at once) and the tray stops
+/// responding until restart. Rebuilds are coalesced and strictly
+/// serialized, and each build runs on a fresh Menu instance so its ids and
+/// item list can never be clobbered by another build.
+bool _trayRebuildQueued = false;
+Future<void>? _trayRebuildLoop;
+
+Future<void> _rebuildTrayMenu() {
   if (_systemTray == null) {
     // ignore: avoid_print
     print('TRAY rebuild skipped: tray is null');
-    return;
+    return Future.value();
   }
-  // ignore: avoid_print
-  print('TRAY rebuilding (lang=${ShimejiApp.instance.effectiveLanguageTag})');
-  await _buildTrayMenu(_systemTray!);
-  // ignore: avoid_print
-  print('TRAY rebuild done');
+  _trayRebuildQueued = true;
+  return _trayRebuildLoop ??= _processTrayRebuilds();
+}
+
+Future<void> _processTrayRebuilds() async {
+  try {
+    while (_trayRebuildQueued) {
+      _trayRebuildQueued = false;
+      try {
+        await _buildTrayMenu(_systemTray!);
+      } catch (e) {
+        // Never let one failed build kill the loop; the next request
+        // retries with fresh state.
+        // ignore: avoid_print
+        print('TRAY rebuild failed: $e');
+      }
+    }
+  } finally {
+    _trayRebuildLoop = null;
+  }
 }
 
 /// Absolute path of the tray icon next to the executable.
@@ -240,13 +263,13 @@ String _trayIconPath() {
   return '$root$separator' 'icon.ico';
 }
 
-final Menu _sharedTrayMenu = Menu();
-
 Future<void> _buildTrayMenu(SystemTray tray) async {
   final app = ShimejiApp.instance;
   final lang = app.languageBundle;
   final settings = app.settings;
-  final menu = _sharedTrayMenu;
+  // A fresh Menu per build: the plugin assigns each build its own menu id
+  // and item id counter, so concurrent state can never collide.
+  final menu = Menu();
   final firstSet = settings.activeImageSets.isNotEmpty
       ? settings.activeImageSets.first
       : null;
