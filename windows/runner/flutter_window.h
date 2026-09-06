@@ -24,8 +24,8 @@ class FlutterWindow : public Win32Window {
                          LPARAM const lparam) noexcept override;
 
  private:
-  // Registers the "shimeji/overlay" MethodChannel handlers.
-  void RegisterOverlayChannel();
+  // Registers the mascot window management channel.
+  void RegisterMascotChannel();
 
   // The project to run.
   flutter::DartProject project_;
