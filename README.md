@@ -28,11 +28,11 @@ build\windows\x64\runner\Release\shimeji_flutter.exe
 
 | 원본 (Java) | 포트 (Flutter/Dart) | 비고 |
 |---|---|---|
-| AWT/Swing 투명 JWindow(마스코트당 1개) | **단일 오버레이 윈도우** + 컬러키 투명 | `WS_EX_LAYERED` + `LWA_COLORKEY`(마젠타) — 픽셀 단위 클릭스루를 OS가 처리 |
+| AWT/Swing 투명 JWindow(마스코트당 1개) | **마스코트당 네이티브 레이어드 윈도우** (`UpdateLayeredWindow`) | Dart 엔진이 포즈 비트맵(프리멀티플라이드 BGRA)을 채널로 밀고 네이티브가 표시 — 픽셀 알파 투명/클릭스루를 DWM이 처리 |
 | JNA(jna-platform) Win32 접근 | [`win32`](https://pub.dev/packages/win32) (Dart FFI) | EnumWindows z-order 활성 창 탐지, DWM cloaked/maximized 필터, 모니터 작업 영역, SetWindowPos(창 던지기) |
 | Nashorn JS 스크립트 (`#{...}`/`${...}`) | 자체 구현 JS 서브셋 평가기 (`lib/src/script/`) | Shimeji 설정이 쓰는 문법 전체(속성 탐색, `isOn()` 메서드 호출, `Math.*`, 삼항/비교/논리) 지원, 프레임별 재평가/캐시 의미론 보존 |
 | javax.sound.sampled Clip | [`audioplayers`](https://pub.dev/packages/audioplayers) | dB 볼륨(MASTER_GAIN 호환) |
-| Swing 트레이/메뉴/다이얼로그 | [`system_tray`](https://pub.dev/packages/system_tray) + Flutter 오버레이 UI | 이미지셋 선택기/설정/통계 패널을 오버레이에 렌더링 |
+| Swing 트레이/메뉴/다이얼로그 | [`system_tray`](https://pub.dev/packages/system_tray) + **네이티브 Win32 팝업 메뉴** (`TrackPopupMenu`) | 마스코트 컨텍스트 메뉴는 네이티브 팝업(항목 선택 인덱스를 Dart 콜백에 매핑), 트레이에 이미지셋/언어 체크박스 서브메뉴 |
 | ImageIO + hqx(Hq2x/3x/4x) | `dart:ui` 디코딩 + **hqx 순수 Dart 포팅** (`tool/convert_hqx.py`로 Java→Dart 자동 변환) | nearest/bicubic은 Flutter FilterQuality, hqx는 픽셀 알고리즘 그대로 |
 | java.util.ResourceBundle (.properties) | 자체 properties 파서 (`Settings`, `LanguageBundle`) | 언어 파일 21개 국어 그대로 사용 |
 | Swing Timer 틱 루프(40ms/25FPS) | `Timer.periodic(40ms)` 단일 isolate | 로직/렌더 2-pass 구조 보존 |
@@ -53,15 +53,17 @@ build\windows\x64\runner\Release\shimeji_flutter.exe
 
 ## 아키텍처 노트
 
-- **렌더링**: 원본은 마스코트당 투명 윈도우였지만, Flutter는 단일 전체화면
-  always-on-top 오버레이로 모든 마스코트를 그립니다(25FPS CustomPaint).
-  오버레이 배경은 순수 마젠타(`0xFFFF00FF`)이고 러너가 이 색을 컬러키로 지정해
-  투명+클릭스루 처리합니다. 마젠타 픽셀은 실제 화면에서 완전히 투명하며 마우스 이벤트도
-  통과합니다(`WindowFromPoint`로 검증). DWM accent 방식과 달리 원격 데스크톱에서도 동작합니다.
-- **좌표계**: 엔진 전체가 물리 픽셀 좌표(원본의 DPI 보정 문제를 우회), 렌더링 시에만
-  devicePixelRatio로 변환합니다.
-- **입력**: 커서/버튼 상태를 틱마다 폴링(GetCursorPos/GetAsyncKeyState) — 원본의 이벤트
-  기반 흐름과 동일한 의미론(누름→Dragged, 놓음→Thrown)을 유지합니다.
+- **렌더링**: 원본과 동일하게 마스코트마다 최상위 투명 윈도우를 하나씩 갖습니다.
+  Flutter 엔진은 헤드리스로 실행되고, 매 틱(40ms) 각 마스코트의 현재 포즈를
+  프리멀티플라이드 BGRA 비트맵으로 변환해 `UpdateLayeredWindow`로 표시합니다
+  (`lib/src/native/mascot_windows.dart` ↔ 러너 `mascot_windows.cpp`).
+  픽셀 알파 투명과 클릭스루(알파 0 픽셀 통과)는 DWM 레벨에서 처리되므로
+  원격 데스크톱/하이브리드 GPU에서도 동일하게 동작합니다. (DWM accent나 컬러키
+  방식은 Flutter의 D3D 자식 뷰 픽셀에는 적용되지 않아 기각했습니다.)
+- **좌표계**: 엔진 전체가 물리 픽셀 좌표(원본의 DPI 보정 문제를 우회).
+- **입력**: 커서/버튼 상태를 틱마다 폴링(GetCursorPos/GetAsyncKeyState) — 누름→Dragged,
+  놓음→Thrown, 우클릭 놓음→컨텍스트 메뉴. 메뉴는 러너의 `TrackPopupMenu`으로 표시되며
+  선택된 항목 인덱스가 Dart의 동작 콜백으로 반환됩니다.
 - **hqx**: `tool/convert_hqx.py`가 Java 소스를 자동 변환했습니다(`lib/src/image/hqx/`).
   `Filter=hqx` 설정 시 2/3/4배수 스케일에서 사용됩니다.
 
@@ -79,10 +81,11 @@ build\windows\x64\runner\Release\shimeji_flutter.exe
 
 - 오버레이는 주 모니터 DPI 기준 가상 화면에 맞춰져 있습니다. 서로 다른 DPI의 다중 모니터
   경계에서는 원본과 유사한 한계가 있습니다.
-- 컬러키 방식 특성상 반투명 합성(불투명도 슬라이더, 그림자)은 마젠타와의 블렌딩으로
-  표현됩니다. 스프라이트에 순수 마젠타(#FF00FF) 픽셀이 있으면 구멍이 됩니다.
+- 스프라이트 불투명도(Opacity)는 네이티브 프레젠테이션에서 알파 배수로 적용됩니다.
 - `InteractiveWindows` 기능(활성 창 던지기 등)은 설정에 타이틀 문자열을 넣어야 활성화됩니다
   (원본과 동일).
+- 상세 설정 창(스케일/불투명도/대화형 창 목록 편집)은 `conf/settings.properties`를 직접
+  편집하는 방식으로 대체했습니다(트레이 체크박스 항목은 모두 동작).
 - X11/macOS 전용 플랫폼 레이어는 미포팅(Windows 우선).
 - 가상 윈도우 모드(`Environment=virtual`, 디버그용 창 에뮬레이션)은 미포팅 — 설정 파일에는
   값이 그대로 보존됩니다.
