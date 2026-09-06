@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -19,6 +20,8 @@ class MascotWindows {
     std::wstring label;
     bool checked = false;
     bool separator = false;
+    // When set, this item opens a nested popup containing |children|.
+    std::shared_ptr<std::vector<MenuItem>> children;
   };
 
   static MascotWindows& Instance();
@@ -44,6 +47,11 @@ class MascotWindows {
   static LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wparam,
                                   LPARAM lparam);
   void EnsureClass();
+
+  // Recursively appends |items| to |menu|. Selectable entries get sequential
+  // command ids so the returned id maps back to a flat index.
+  void AppendItems(HMENU menu, const std::vector<MenuItem>& items,
+                   int* next_command_id);
 
   std::map<int, HWND> windows_;
 };

@@ -16,12 +16,21 @@ class NativeMenuEntry {
   final String? label;
   final bool checked;
   final bool separator;
+
+  /// Nested popup entries; non-null turns this item into a submenu.
+  final List<NativeMenuEntry>? children;
+
   const NativeMenuEntry.label(this.label, {this.checked = false})
-      : separator = false;
+      : separator = false,
+        children = null;
   const NativeMenuEntry.separator()
       : label = null,
         checked = false,
-        separator = true;
+        separator = true,
+        children = null;
+  const NativeMenuEntry.submenu(this.label, this.children)
+      : checked = false,
+        separator = false;
 }
 
 class MascotNativeWindows {
@@ -38,9 +47,15 @@ class MascotNativeWindows {
     _bitmapCache.clear();
   }
 
-  static Map<String, Object>? _encodeItem(NativeMenuEntry item) {
+  static Map<String, Object> _encodeItem(NativeMenuEntry item) {
     if (item.separator) {
       return {'separator': true};
+    }
+    if (item.children != null) {
+      return {
+        'label': item.label!,
+        'children': [for (final child in item.children!) _encodeItem(child)],
+      };
     }
     return {'label': item.label!, 'checked': item.checked};
   }

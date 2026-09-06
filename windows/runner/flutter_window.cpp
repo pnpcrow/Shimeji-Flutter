@@ -14,6 +14,8 @@ using flutter::EncodableValue;
 
 const char kChannelName[] = "shimeji/mascots";
 
+using MascotMenuItem = MascotWindows::MenuItem;
+
 std::wstring Utf8ToWide(const std::string& utf8) {
   if (utf8.empty()) {
     return std::wstring();
@@ -38,6 +40,42 @@ int32_t GetInt(const EncodableMap& map, const char* key) {
     return static_cast<int32_t>(*value);
   }
   return 0;
+}
+
+MascotMenuItem ParseMenuItem(const EncodableMap& map) {
+  MascotMenuItem item;
+  auto label_it = map.find(EncodableValue("label"));
+  if (label_it != map.end()) {
+    if (const auto* label = std::get_if<std::string>(&label_it->second)) {
+      item.label = Utf8ToWide(*label);
+    }
+  }
+  auto checked_it = map.find(EncodableValue("checked"));
+  if (checked_it != map.end()) {
+    if (const auto* checked = std::get_if<bool>(&checked_it->second)) {
+      item.checked = *checked;
+    }
+  }
+  auto separator_it = map.find(EncodableValue("separator"));
+  if (separator_it != map.end()) {
+    if (const auto* separator = std::get_if<bool>(&separator_it->second)) {
+      item.separator = *separator;
+    }
+  }
+  auto children_it = map.find(EncodableValue("children"));
+  if (children_it != map.end()) {
+    if (const auto* children =
+            std::get_if<EncodableList>(&children_it->second)) {
+      auto child_items = std::make_shared<std::vector<MascotMenuItem>>();
+      for (const EncodableValue& child : *children) {
+        if (const auto* child_map = std::get_if<EncodableMap>(&child)) {
+          child_items->push_back(ParseMenuItem(*child_map));
+        }
+      }
+      item.children = std::move(child_items);
+    }
+  }
+  return item;
 }
 
 }  // namespace
@@ -142,7 +180,7 @@ void FlutterWindow::RegisterMascotChannel() {
           int id = GetInt(map, "id");
           int x = GetInt(map, "x");
           int y = GetInt(map, "y");
-          std::vector<MascotWindows::MenuItem> items;
+          std::vector<MascotMenuItem> items;
           auto items_it = map.find(EncodableValue("items"));
           if (items_it != map.end()) {
             if (const auto* list =
@@ -169,6 +207,21 @@ void FlutterWindow::RegisterMascotChannel() {
                     if (const auto* separator =
                             std::get_if<bool>(&separator_it->second)) {
                       out.separator = *separator;
+                    }
+                  }
+                  auto children_it = item->find(EncodableValue("children"));
+                  if (children_it != item->end()) {
+                    if (const auto* children =
+                            std::get_if<EncodableList>(&children_it->second)) {
+                      out.children =
+                          std::make_shared<std::vector<MascotMenuItem>>();
+                      for (const EncodableValue& child : *children) {
+                        if (const auto* child_map =
+                                std::get_if<EncodableMap>(&child)) {
+                          out.children->push_back(
+                              ParseMenuItem(*child_map));
+                        }
+                      }
                     }
                   }
                   items.push_back(std::move(out));

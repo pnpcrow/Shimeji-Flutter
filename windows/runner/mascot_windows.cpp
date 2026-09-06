@@ -160,15 +160,7 @@ int MascotWindows::ShowContextMenu(int id, int x, int y,
     return -1;
   }
   int command_id = 1;
-  for (const MenuItem& item : items) {
-    if (item.separator) {
-      AppendMenu(menu, MF_SEPARATOR, 0, nullptr);
-    } else {
-      UINT flags = MF_STRING | (item.checked ? MF_CHECKED : 0);
-      AppendMenu(menu, flags, command_id, item.label.c_str());
-      command_id++;
-    }
-  }
+  AppendItems(menu, items, &command_id);
 
   // TPM_RETURNCMD returns the chosen command id instead of posting
   // WM_COMMAND; TPM_NOACTIVATE keeps the mascot from stealing focus.
@@ -219,4 +211,29 @@ int MascotWindows::ShowContextMenu(int id, int x, int y,
     current_id++;
   }
   return selectable_index;
+}
+
+void MascotWindows::AppendItems(HMENU menu, const std::vector<MenuItem>& items,
+                                int* next_command_id) {
+  for (const MenuItem& item : items) {
+    if (item.separator) {
+      AppendMenu(menu, MF_SEPARATOR, 0, nullptr);
+      continue;
+    }
+    UINT flags = MF_STRING | (item.checked ? MF_CHECKED : 0);
+    if (item.children != nullptr) {
+      // Nested popup: the item opens a child menu instead of returning a
+      // command id, so it does not consume a command id.
+      HMENU child = CreatePopupMenu();
+      if (!child) {
+        continue;
+      }
+      AppendItems(child, *item.children, next_command_id);
+      AppendMenu(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(child),
+                 item.label.c_str());
+      continue;
+    }
+    AppendMenu(menu, flags, *next_command_id, item.label.c_str());
+    (*next_command_id)++;
+  }
 }
