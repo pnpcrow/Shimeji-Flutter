@@ -99,11 +99,7 @@ class ShimejiApp {
   }
 
   void _spawnMascot(String imageSet, Configuration configuration) {
-    final mascot = Mascot(imageSet);
-    mascot.onShowPopup = (x, y) {
-      final bounds = mascot.bounds;
-      onShowContextMenu?.call(mascot, bounds.x + x, bounds.y + y);
-    };
+    final mascot = createMascotObject(imageSet);
     mascot.anchor.setLocation(-4000, -4000);
     mascot.lookRight = _random.nextBool();
     try {
@@ -234,6 +230,7 @@ class ShimejiApp {
     EngineHooks.instance.throwing = () => settings.throwing;
     EngineHooks.instance.multiscreen = () => settings.multiscreen;
     EngineHooks.instance.configuration = configurationFor;
+    EngineHooks.instance.createMascot = createMascotObject;
     EngineHooks.instance.disabledBehaviorsFor =
         (imageSet) => settings.disabledBehaviors[imageSet];
     EngineHooks.instance.showError = _showError;
@@ -458,6 +455,18 @@ class ShimejiApp {
     final configuration = configurationFor(imageSet);
     if (configuration == null) return;
     _spawnMascot(imageSet, configuration);
+  }
+
+  /// Creates a mascot with the popup wiring attached. All mascot creation
+  /// must go through this factory: mascots built elsewhere (breeding,
+  /// transformation) would otherwise lack context-menu support.
+  Mascot createMascotObject(String imageSet) {
+    final mascot = Mascot(imageSet);
+    mascot.onShowPopup = (x, y) {
+      final bounds = mascot.bounds;
+      onShowContextMenu?.call(mascot, bounds.x + x, bounds.y + y);
+    };
+    return mascot;
   }
 
   /// Menu "Choose Shimeji": switches to the given list of image sets.

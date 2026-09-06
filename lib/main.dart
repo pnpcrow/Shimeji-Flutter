@@ -72,8 +72,6 @@ Future<void> _runEngine() async {
         y: physicalY,
         items: entries,
       );
-      // ignore: avoid_print
-      print('MENU selected=$selected');
       if (selected >= 0 && selected < mascot.contextMenuActions.length) {
         mascot.contextMenuActions[selected]();
       }

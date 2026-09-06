@@ -3,6 +3,7 @@
 library;
 
 import '../manager.dart';
+import '../mascot.dart' show Mascot;
 
 class EngineHooks {
   static EngineHooks instance = EngineHooks();
@@ -18,6 +19,10 @@ class EngineHooks {
       (_) => null;
   late void Function(String message, [Object? error]) showError = (_, [_]) {};
   late Manager? Function() manager = () => null;
+
+  /// Factory every mascot creation must go through so popups stay wired.
+  late MascotFactory createMascot = (imageSet) => Mascot(imageSet);
 }
 
 typedef ConfigurationGetter = dynamic Function(String imageSet);
+typedef MascotFactory = Mascot Function(String imageSet);

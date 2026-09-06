@@ -653,7 +653,7 @@ class BreedDelegate {
         ? bornMascot
         : action.mascot.imageSet;
     for (var index = 0; index < getBornCount(); index++) {
-      final newMascot = Mascot(childType);
+      final newMascot = EngineHooks.instance.createMascot(childType);
       if (action.mascot.lookRight) {
         newMascot.anchor.setLocation(
             action.mascot.anchor.x - javaRound(getBornX() * scaling),
