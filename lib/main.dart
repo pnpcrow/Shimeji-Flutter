@@ -319,10 +319,7 @@ Future<void> _buildTrayMenu(SystemTray tray) async {
                 next.add(set);
               }
               if (next.isEmpty) return;
-              unawaited(app.switchImageSets(next..sort()).then((_) {
-                MascotNativeWindows.clearCache();
-                _rebuildTrayMenu();
-              }));
+              unawaited(app.switchImageSets(next..sort()));
             },
           ),
       ],

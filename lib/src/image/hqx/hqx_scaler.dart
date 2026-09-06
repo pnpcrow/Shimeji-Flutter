@@ -57,5 +57,10 @@ Future<ui.Image> applyHqx(ui.Image source, int factor) async {
   );
   final codec = await descriptor.instantiateCodec();
   final frame = await codec.getNextFrame();
+  // The buffer/descriptor/codec are decode intermediates only; the frame
+  // owns its image from here.
+  codec.dispose();
+  descriptor.dispose();
+  buffer.dispose();
   return frame.image;
 }

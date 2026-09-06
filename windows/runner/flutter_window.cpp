@@ -319,6 +319,14 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   }
 
   switch (message) {
+    case WM_NCCALCSIZE:
+      // Chromeless settings window: keep the whole window as client area so
+      // the frame reserved by WS_THICKFRAME (visible as a black strip above
+      // the Flutter header) disappears. DWM keeps shadow + rounded corners.
+      if (wparam && settings_visible_) {
+        return 0;
+      }
+      break;
     case WM_CLOSE:
       // The host window doubles as the settings dialog. Closing it hides it
       // again instead of tearing down the engine.

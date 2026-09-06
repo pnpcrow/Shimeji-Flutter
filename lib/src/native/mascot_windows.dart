@@ -43,7 +43,15 @@ class MascotNativeWindows {
   static const MethodChannel _channel = MethodChannel('shimeji/mascots');
 
   static final Set<int> _nativeAlive = {};
+
+  /// Premultiplied BGRA bytes per (pose, flip, opacity). This can be large
+  /// (width * height * 4 bytes per pose, 1 MB at 4x scaling of a 128px
+  /// sprite), so it is bounded: least-recently-used entries are evicted
+  /// once the budget is exceeded. Evicted poses are simply re-prepared the
+  /// next time they are shown.
+  static const int _bitmapCacheBudget = 64 * 1024 * 1024;
   static final Map<String, Uint8List> _bitmapCache = {};
+  static int _bitmapCacheBytes = 0;
   static final Map<int, String> _lastSent = {};
 
   MascotNativeWindows._();
@@ -51,6 +59,7 @@ class MascotNativeWindows {
   /// Clears the prepared-bitmap cache (image sets changed).
   static void clearCache() {
     _bitmapCache.clear();
+    _bitmapCacheBytes = 0;
   }
 
   static Map<String, Object> _encodeItem(NativeMenuEntry item) {
@@ -105,8 +114,12 @@ class MascotNativeWindows {
       MascotImage image, bool flipped, double opacity) {
     final key =
         '${identityHashCode(image)}:$flipped:${opacity.toStringAsFixed(3)}';
-    final cached = _bitmapCache[key];
-    if (cached != null) return cached;
+    // Re-inserting on hit refreshes recency (insertion-ordered map).
+    final cached = _bitmapCache.remove(key);
+    if (cached != null) {
+      _bitmapCache[key] = cached;
+      return cached;
+    }
 
     final w = image.width;
     final h = image.height;
@@ -128,6 +141,11 @@ class MascotNativeWindows {
       }
     }
     _bitmapCache[key] = out;
+    _bitmapCacheBytes += out.length;
+    while (_bitmapCacheBytes > _bitmapCacheBudget && _bitmapCache.length > 1) {
+      final oldest = _bitmapCache.keys.first;
+      _bitmapCacheBytes -= _bitmapCache.remove(oldest)!.length;
+    }
     return out;
   }
 

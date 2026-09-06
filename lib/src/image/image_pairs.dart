@@ -41,20 +41,31 @@ class ImagePairs {
     }
   }
 
+  /// Evicts every cached pair of [imageSet], disposing the decoded
+  /// [ui.Image]s. Called when a set is unloaded or re-decoded (scaling
+  /// change); without it every reload would accumulate the full decode of
+  /// every set ever shown until the engine runs out of memory.
   static void removeAll(String imageSet) {
     final keys = _imageSetsToImagePairs.remove(imageSet);
     if (keys == null) return;
     for (final key in keys) {
-      _imagePairs.remove(key);
+      _imagePairs.remove(key)?.dispose();
     }
   }
 
   static void clear() {
+    for (final pair in _imagePairs.values) {
+      pair.dispose();
+    }
     _imagePairs.clear();
     _imageSetsToImagePairs.clear();
   }
 
   /// Loads an image pair. Returns the cache key.
+  ///
+  /// The key encodes scaling and filter, so a change of either re-decodes
+  /// instead of silently serving the stale size (callers must evict the old
+  /// entries via [removeAll]).
   static Future<String> load(
     String path,
     String? rightPath,
@@ -62,15 +73,18 @@ class ImagePairs {
     int anchorY,
     double scaling,
     Filter filter,
-    double opacity,
   ) async {
-    var key = '$anchorX,$anchorY:$path';
+    var key = '$anchorX,$anchorY:${scaling.toStringAsFixed(4)}:'
+        '${filter.name}:$path';
     if (rightPath != null) key += ':$rightPath';
     if (_imagePairs.containsKey(key)) return key;
 
     final leftBytes = await File(resolveImagePath(path)).readAsBytes();
     final leftImage = await _decode(leftBytes);
     final leftScaled = await _scale(leftImage, scaling, filter);
+    // _scale returns the source itself when no scaling applies; otherwise
+    // the decoded original is an intermediate and must be freed.
+    if (!identical(leftScaled, leftImage)) leftImage.dispose();
     final scaledAnchorX = javaRound(anchorX * scaling);
     final scaledAnchorY = javaRound(anchorY * scaling);
 
@@ -93,6 +107,7 @@ class ImagePairs {
       final rightBytes = await File(resolveImagePath(rightPath)).readAsBytes();
       final rightImage = await _decode(rightBytes);
       final rightScaled = await _scale(rightImage, scaling, filter);
+      if (!identical(rightScaled, rightImage)) rightImage.dispose();
       right = await _mascotImage(rightScaled, scaledAnchorX, scaledAnchorY);
     }
 
@@ -121,6 +136,10 @@ class ImagePairs {
   /// Port of ImageUtils.scale: applies hqx for integral 2x/3x/4x scaling,
   /// then rescales the remainder with nearest-neighbour or bicubic
   /// interpolation.
+  ///
+  /// Returns [source] itself when no scaling applies; otherwise the caller
+  /// owns the result and [source] (if different) must be disposed by it.
+  /// The hqx intermediate is disposed here.
   static Future<ui.Image> _scale(
       ui.Image source, double scaling, Filter filter) async {
     if (scaling == 1) return source;
@@ -165,6 +184,8 @@ class ImagePairs {
     final picture = recorder.endRecording();
     final scaled = picture.toImageSync(width, height);
     picture.dispose();
+    // The hqx output was only an intermediate for the canvas draw.
+    if (!identical(working, source)) working.dispose();
     return scaled;
   }
 

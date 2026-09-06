@@ -18,7 +18,6 @@ import 'package:flutter/services.dart';
 import '../app.dart';
 import '../settings.dart' show Settings;
 import '../native/app_window.dart';
-import '../native/mascot_windows.dart';
 
 class SettingsScreen extends StatefulWidget {
   final ShimejiApp app;
@@ -139,7 +138,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
     if (next.isEmpty) return;
     await widget.app.switchImageSets(next..sort());
-    MascotNativeWindows.clearCache();
   }
 
   /// Commits the interactive-window field live (debounced while typing) so
@@ -231,8 +229,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           divisions: 15,
                           value: scaling,
                           onChanged: (v) => setState(() => scaling = v),
-                          onChangeEnd: (v) =>
-                              _apply((s) => s.scaling = v),
+                          // Scaling is baked into the decoded sprites: on
+                          // release, re-decode and respawn every active set.
+                          onChangeEnd: (v) async {
+                            if ((v - widget.app.settings.scaling).abs() <
+                                0.0005) {
+                              return;
+                            }
+                            await widget.app.applyScaling(v);
+                          },
                         ),
                         _sliderValueRow(lang.getString('Opacity'),
                             '${(opacity * 100).round()}%'),

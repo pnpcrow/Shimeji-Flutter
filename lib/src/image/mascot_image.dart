@@ -102,4 +102,13 @@ class ImagePair {
   ImagePair(this.leftImage, this.rightImage);
 
   MascotImage getImage(bool lookRight) => lookRight ? rightImage : leftImage;
+
+  /// Frees the decoded bitmaps. The mirrored right image shares the left
+  /// bitmap, so it is disposed only once.
+  void dispose() {
+    leftImage.image.dispose();
+    if (!identical(rightImage.image, leftImage.image)) {
+      rightImage.image.dispose();
+    }
+  }
 }

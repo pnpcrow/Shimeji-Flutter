@@ -22,6 +22,7 @@ import 'image/hqx/hqx_scaler.dart';
 import 'image/image_pairs.dart';
 import 'manager.dart';
 import 'mascot.dart';
+import 'native/mascot_windows.dart';
 import 'settings.dart';
 import 'sound/sounds.dart';
 
@@ -555,9 +556,29 @@ class ShimejiApp {
   }
 
   /// Menu "Choose Shimeji": switches to the given list of image sets.
-  Future<void> switchImageSets(List<String> imageSets) async {
+  ///
+  /// [evictAll] re-decodes every set (used when the scaling setting
+  /// changed); by default only sets that leave the active list are freed.
+  /// Decoded pose images are disposed on eviction, so toggling sets can
+  /// never accumulate the decodes of every set ever shown.
+  Future<void> switchImageSets(List<String> imageSets,
+      {bool evictAll = false}) async {
+    final previous = settings.activeImageSets.toSet();
+    // Reloading momentarily empties the manager; the exit-on-last-removed
+    // rule must not fire in between (it terminated the whole app whenever
+    // image sets were switched or the scaling re-decoded them).
+    manager.exitOnLastRemoved = false;
     manager.disposeAll();
+    // The premultiplied-bitmap cache is keyed by pose image identity;
+    // respawned mascots get fresh poses, so stale entries only leak.
+    MascotNativeWindows.clearCache();
     configurations.clear();
+    final evicted =
+        evictAll ? previous : previous.difference(imageSets.toSet());
+    for (final imageSet in evicted) {
+      ImagePairs.removeAll(imageSet);
+      Sounds.removeAll(imageSet);
+    }
     settings.activeImageSets
       ..clear()
       ..addAll(imageSets);
@@ -565,12 +586,28 @@ class ShimejiApp {
       await loadConfiguration(imageSet);
     }
     _saveSettings();
+    var spawned = 0;
     for (final imageSet in settings.activeImageSets) {
       final configuration = configurations[imageSet];
       if (configuration == null) continue;
       _spawnMascot(imageSet, configuration);
+      spawned++;
+    }
+    // Nothing spawned (e.g. a broken custom image set): stay alive with a
+    // clean desktop — the tray keeps working and the user can pick again.
+    // Never let a broken set terminate the app.
+    if (spawned > 0) {
+      manager.exitOnLastRemoved = true;
     }
     onRefreshUi?.call();
+  }
+
+  /// Re-decodes every active image set at the new [scaling] (settings
+  /// screen): applies the setting, disposes mascots, frees the old-scale
+  /// decodes and respawns everything at the new size.
+  Future<void> applyScaling(double scaling) async {
+    settings.scaling = scaling;
+    await switchImageSets(settings.activeImageSets.toList(), evictAll: true);
   }
 
   void _showError(String message, [Object? error]) {

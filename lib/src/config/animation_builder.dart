@@ -85,10 +85,9 @@ class AnimationBuilder {
       final anchorX = int.parse(anchorCoordinates[0]);
       final anchorY = int.parse(anchorCoordinates[1]);
       final filter = settings.filter;
-      final opacity = settings.opacity;
       try {
         imageKey = await ImagePairs.load(
-            imagePath, imageRightPath, anchorX, anchorY, scaling, filter, opacity);
+            imagePath, imageRightPath, anchorX, anchorY, scaling, filter);
         ImagePairs.addUsage(imageKey, imageSet);
       } catch (e) {
         throw ConfigurationException('Failed to load image: $imagePath', e);
