@@ -23,6 +23,28 @@ std::wstring Utf8ToWide(const std::string& utf8) {
   return wide;
 }
 
+// Resolves the chosen Win32 command id back to the item's stable Dart-side
+// id, walking nested submenus depth-first in append order.
+std::wstring IdForCommandId(
+    const std::vector<MascotWindows::MenuItem>& items, int command_id) {
+  for (const MascotWindows::MenuItem& item : items) {
+    if (item.separator) {
+      continue;
+    }
+    if (item.children) {
+      std::wstring found = IdForCommandId(*item.children, command_id);
+      if (!found.empty()) {
+        return found;
+      }
+      continue;
+    }
+    if (item.native_command_id == command_id) {
+      return Utf8ToWide(item.id);
+    }
+  }
+  return std::wstring();
+}
+
 }  // namespace
 
 MascotWindows& MascotWindows::Instance() {
@@ -190,10 +212,12 @@ std::wstring MascotWindows::ShowContextMenu(
   }
   DestroyMenu(menu);
 
-  // Trace: which command id did the user pick?
-  fwprintf(stderr, L"[menu] selected command_id=%d\n", selected);
-  fflush(stderr);
- return std::wstring();
+  // TPM_RETURNCMD: the result is the chosen item's command id (0 =
+  // dismissed). Map it back to the stable id the Dart side registered.
+  if (selected == 0) {
+    return std::wstring();
+  }
+  return IdForCommandId(items, selected);
 }
 
 void MascotWindows::AppendItems(HMENU menu, std::vector<MenuItem>& items,

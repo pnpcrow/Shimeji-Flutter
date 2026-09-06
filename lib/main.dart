@@ -83,7 +83,11 @@ Future<void> _runEngine() async {
         y: physicalY,
         items: entries,
       );
+      // ignore: avoid_print
+      print('MENU selected id: "$selectedId"');
       final action = mascot.contextMenuActionFor(selectedId);
+      // ignore: avoid_print
+      print('MENU action resolved: ${action != null}');
       if (action != null) {
         action();
       }
@@ -123,6 +127,21 @@ Future<void> _runEngine() async {
   if (Platform.environment['SHIMEJI_OPEN_SETTINGS'] == '1') {
     settingsOpen.value = true;
     await app_window.AppWindow.showSettingsWindow();
+  }
+
+  // Diagnostic: pop a mascot context menu at a fixed position so the
+  // selection round-trip (Dart -> native popup -> id -> action) can be
+  // exercised without relying on input polling.
+  if (Platform.environment['SHIMEJI_TEST_MENU'] == '1') {
+    final mascot =
+        app.manager.mascots.isNotEmpty ? app.manager.mascots.first : null;
+    if (mascot != null) {
+      Future.delayed(const Duration(seconds: 3), () {
+        // ignore: avoid_print
+        print('TESTMENU opening at 400,400');
+        app.onShowContextMenu!(mascot, 400, 400);
+      });
+    }
   }
 
   Timer.periodic(const Duration(milliseconds: Manager.tickInterval), (_) {
@@ -171,86 +190,6 @@ void _tick(ShimejiApp app) {
 }
 
 SystemTray? _systemTray;
-
-/// Builds the tray menu entries with the same id-keyed contract as the
-/// mascot context menu. Shown through the native popup at the cursor.
-List<NativeMenuEntry> _buildTrayEntries() {
-  final app = ShimejiApp.instance;
-  final lang = app.languageBundle;
-  final settings = app.settings;
-  final firstSet = settings.activeImageSets.isNotEmpty
-      ? settings.activeImageSets.first
-      : null;
-  final entries = <NativeMenuEntry>[];
-  final actions = <String, void Function()>{};
-  var seq = 0;
-  String nextId() => 'tray-${seq++}';
-
-  void addItem(String label, void Function() action, {bool checked = false}) {
-    final id = nextId();
-    entries.add(NativeMenuEntry.label(label, id: id, checked: checked));
-    actions[id] = action;
-  }
-
-  void addSep() => entries.add(const NativeMenuEntry.separator());
-
-  addItem(lang.getString('CallShimeji'), () {
-    if (firstSet != null) app.createMascot(firstSet);
-  });
-  addItem(lang.getString('FollowCursor'), () {
-    if (firstSet == null) return;
-    final configuration = app.configurationFor(firstSet);
-    if (configuration != null) {
-      app.manager.setBehaviorAllFor(configuration, 'ChaseMouse', firstSet);
-    }
-  });
-  addItem(lang.getString('ReduceToOne'),
-      () => app.manager.remainOne());
-  addItem(lang.getString('RestoreWindows'),
-      () => app.environment.restoreWindows());
-  addSep();
-  addItem(lang.getString('ChooseShimeji'),
-      () => app.onOpenImageSetChooser!());
-  addItem(lang.getString('Settings'), () => app.onOpenSettings!());
-  addSep();
-  for (final spec in [
-    (lang.getString('Breeding'), () => settings.breeding = !settings.breeding,
-        () => settings.breeding),
-    (lang.getString('Transients'), () => settings.transients = !settings.transients,
-        () => settings.transients),
-    (lang.getString('Transformation'),
-        () => settings.transformation = !settings.transformation,
-        () => settings.transformation),
-    (lang.getString('ThrowingWindows'),
-        () => settings.throwing = !settings.throwing, () => settings.throwing),
-    (lang.getString('SoundEffects'), () => settings.sounds = !settings.sounds,
-        () => settings.sounds),
-    (lang.getString('Multiscreen'),
-        () => settings.multiscreen = !settings.multiscreen,
-        () => settings.multiscreen),
-  ]) {
-    final getValue = spec.$3;
-    addItem(spec.$1, () {
-      spec.$2();
-      app.saveSettings();
-      _rebuildTrayMenu();
-    }, checked: getValue());
-  }
-  addSep();
-  addItem(
-      app.manager.isPaused
-          ? lang.getString('ResumeAnimations')
-          : lang.getString('PauseAnimations'),
-      () {
-        app.manager.togglePauseAll();
-      });
-  addSep();
-  addItem(lang.getString('DismissAll'), () => app.exit());
-  addSep();
-  addItem('Exit', () => app.exit());
-
-  return entries;
-}
 
 Future<void> _setupTray() async {
   final tray = SystemTray();
@@ -312,6 +251,14 @@ Future<void> _buildTrayMenu(SystemTray tray) async {
       ? settings.activeImageSets.first
       : null;
   final availableSets = await app.availableImageSets();
+
+  // Persists the change and broadcasts it: the notifier rebuilds this tray
+  // menu and refreshes the settings screen, so no surface can drift.
+  void applySetting(void Function() mutate) {
+    mutate();
+    app.saveSettings();
+  }
+
   await menu.buildFrom([
     MenuItemLabel(
       label: lang.getString('CallShimeji'),
@@ -370,8 +317,7 @@ Future<void> _buildTrayMenu(SystemTray tray) async {
           checked: app.effectiveLanguageTag.isEmpty ||
               settings.language.isEmpty,
           onClicked: (item) {
-            app.setLanguage('');
-            _rebuildTrayMenu();
+            applySetting(() => app.setLanguage(''));
           },
         ),
         for (final tag in app.availableLanguages())
@@ -380,8 +326,7 @@ Future<void> _buildTrayMenu(SystemTray tray) async {
             checked: app.effectiveLanguageTag == tag &&
                 settings.language.isNotEmpty,
             onClicked: (item) {
-              app.setLanguage(tag);
-              _rebuildTrayMenu();
+              applySetting(() => app.setLanguage(tag));
             },
           ),
       ],
@@ -390,50 +335,38 @@ Future<void> _buildTrayMenu(SystemTray tray) async {
     MenuItemCheckbox(
       label: lang.getString('Breeding'),
       checked: settings.breeding,
-      onClicked: (item) {
-        settings.breeding = !settings.breeding;
-        _rebuildTrayMenu();
-      },
+      onClicked: (item) =>
+          applySetting(() => settings.breeding = !settings.breeding),
     ),
     MenuItemCheckbox(
       label: lang.getString('Transients'),
       checked: settings.transients,
-      onClicked: (item) {
-        settings.transients = !settings.transients;
-        _rebuildTrayMenu();
-      },
+      onClicked: (item) =>
+          applySetting(() => settings.transients = !settings.transients),
     ),
     MenuItemCheckbox(
       label: lang.getString('Transformation'),
       checked: settings.transformation,
-      onClicked: (item) {
-        settings.transformation = !settings.transformation;
-        _rebuildTrayMenu();
-      },
+      onClicked: (item) =>
+          applySetting(() => settings.transformation = !settings.transformation),
     ),
     MenuItemCheckbox(
       label: lang.getString('ThrowingWindows'),
       checked: settings.throwing,
-      onClicked: (item) {
-        settings.throwing = !settings.throwing;
-        _rebuildTrayMenu();
-      },
+      onClicked: (item) =>
+          applySetting(() => settings.throwing = !settings.throwing),
     ),
     MenuItemCheckbox(
       label: lang.getString('SoundEffects'),
       checked: settings.sounds,
-      onClicked: (item) {
-        settings.sounds = !settings.sounds;
-        _rebuildTrayMenu();
-      },
+      onClicked: (item) =>
+          applySetting(() => settings.sounds = !settings.sounds),
     ),
     MenuItemCheckbox(
       label: lang.getString('Multiscreen'),
       checked: settings.multiscreen,
-      onClicked: (item) {
-        settings.multiscreen = !settings.multiscreen;
-        _rebuildTrayMenu();
-      },
+      onClicked: (item) =>
+          applySetting(() => settings.multiscreen = !settings.multiscreen),
     ),
     MenuSeparator(),
     MenuItemLabel(
@@ -442,7 +375,9 @@ Future<void> _buildTrayMenu(SystemTray tray) async {
           : lang.getString('PauseAnimations'),
       onClicked: (item) {
         app.manager.togglePauseAll();
-        _rebuildTrayMenu();
+        // Pause state is per-mascot runtime state; broadcast only refreshes
+        // the tray label and the settings screen listeners.
+        app.broadcastSettingsChanged();
       },
     ),
     MenuItemLabel(

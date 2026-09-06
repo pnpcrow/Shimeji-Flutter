@@ -13,7 +13,7 @@ import 'package:flutter/material.dart';
 
 import '../app.dart';
 import '../settings.dart' show Settings;
-import '../native/app_window.dart';
+import '../native/mascot_windows.dart';
 
 class SettingsScreen extends StatefulWidget {
   final ShimejiApp app;
@@ -45,15 +45,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late double opacity;
   late String language;
   late TextEditingController interactiveWindows;
+  List<String> imageSets = [];
 
   @override
   void initState() {
     super.initState();
     _refreshFromSettings();
-    // Reflect the language actually in effect: '' when following the system.
+    // Reflect the stored choice ('' = follow the system language) so the
+    // dropdown matches its "System language" item.
     language = widget.app.settings.language;
     interactiveWindows = TextEditingController(
         text: widget.app.settings.interactiveWindows.join('/'));
+    _loadImageSets();
     // External changes (tray, context menu) refresh this screen live.
     SettingsChangeNotifier.instance.addListener(_onSettingsBroadcast);
   }
@@ -70,9 +73,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void _onSettingsBroadcast() {
     if (!mounted) return;
     setState(() {
-      language = widget.app.effectiveLanguageTag;
+      language = widget.app.settings.language;
       _refreshFromSettings();
     });
+    _loadImageSets();
+  }
+
+  Future<void> _loadImageSets() async {
+    final sets = await widget.app.availableImageSets();
+    if (!mounted) return;
+    setState(() => imageSets = sets);
   }
 
   void _refreshFromSettings() {
@@ -88,12 +98,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   /// Applies a boolean option immediately (state + persist + broadcast) so
-  /// the tray and mascots pick it up without pressing Save.
+  /// the tray and mascots pick it up without pressing Save. Runtime side
+  /// effects (Sounds.enabled, environment caches) are applied centrally by
+  /// [ShimejiApp.saveSettings].
   void _applyToggle(
       void Function(Settings s) apply, void Function() updateLocal) {
     apply(widget.app.settings);
     updateLocal();
-    widget.app.environment.refreshCache();
     widget.app.saveSettings();
   }
 
@@ -106,22 +117,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
     widget.onLanguageChanged?.call();
   }
 
-  void _applyAndClose() {
+  /// Chooser: adds/removes an image set and respawns the mascots. The
+  /// broadcast from switchImageSets refreshes this screen and the tray.
+  Future<void> _toggleImageSet(String set) async {
     final settings = widget.app.settings;
-    settings.breeding = breeding;
-    settings.transients = transients;
-    settings.transformation = transformation;
-    settings.throwing = throwing;
-    settings.sounds = sounds;
-    settings.multiscreen = multiscreen;
-    settings.opacity = opacity;
-    settings.scaling = scaling;
-    settings.language = language;
-    settings.interactiveWindows = interactiveWindows.text
+    final next = <String>[...settings.activeImageSets];
+    if (next.contains(set)) {
+      next.remove(set);
+    } else {
+      next.add(set);
+    }
+    if (next.isEmpty) return;
+    await widget.app.switchImageSets(next..sort());
+    MascotNativeWindows.clearCache();
+  }
+
+  /// Commits the text field and the scaling slider (the only Save-only
+  /// controls; everything else already applied itself) and closes.
+  void _applyAndClose() {
+    widget.app.settings.scaling = scaling;
+    widget.app.settings.interactiveWindows = interactiveWindows.text
         .split('/')
         .where((s) => s.trim().isNotEmpty)
         .toList();
-    widget.app.environment.refreshCache();
     widget.app.setLanguage(language);
     widget.app.saveSettings();
     widget.onLanguageChanged?.call();
@@ -188,6 +206,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 },
               ),
               const Divider(height: 28),
+              Text('Image sets / 이미지 세트',
+                  style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 6),
+              if (imageSets.isEmpty)
+                const Text('No image sets found.'),
+              for (final set in imageSets)
+                CheckboxListTile(
+                  dense: true,
+                  value: widget.app.settings.activeImageSets.contains(set),
+                  title: Text(set),
+                  onChanged: (_) => _toggleImageSet(set),
+                ),
+              const Divider(height: 28),
               Text('Sprites / 스프라이트',
                   style: Theme.of(context).textTheme.titleMedium),
               Text('Scaling: ${scaling.toStringAsFixed(2)}x  (새 이미지 로딩 시 적용)'),
@@ -205,6 +236,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 divisions: 9,
                 value: opacity,
                 onChanged: (v) => setState(() => opacity = v),
+                onChangeEnd: (v) => _applyToggle(
+                    (s) => s.opacity = v, () => opacity = v),
               ),
               const Divider(height: 28),
               Text('Behaviors / 행동',

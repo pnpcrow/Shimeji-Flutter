@@ -234,7 +234,12 @@ List<NativeMenuEntry> buildContextMenu(ShimejiApp app, dynamic mascot) {
       mascot.paused
           ? lang.getString('ResumeAnimations')
           : lang.getString('PauseAnimations'),
-      () => mascot.paused = !(mascot.paused as bool));
+      () {
+    mascot.paused = !(mascot.paused as bool);
+    // Runtime state, but the tray's Pause/Resume label rebuilds from the
+    // same broadcast, so both surfaces stay in sync.
+    app.broadcastSettingsChanged();
+  });
   builder.addSeparator();
   builder.addItem(lang.getString('Dismiss'), () => mascot.dispose());
   builder.addItem(lang.getString('DismissOthers'),
@@ -249,7 +254,10 @@ List<NativeMenuEntry> buildContextMenu(ShimejiApp app, dynamic mascot) {
   }
 
   // The builder registered every action under its stable id; the native
-  // layer echoes that id back on selection.
-  mascot.contextMenuActions.addAll(builder.actions);
+  // layer echoes that id back on selection. Clear first so ids from a
+  // previous (larger) menu can never resolve to a stale action.
+  mascot.contextMenuActions
+    ..clear()
+    ..addAll(builder.actions);
   return builder.entries;
 }

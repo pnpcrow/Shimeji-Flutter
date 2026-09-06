@@ -28,6 +28,38 @@ std::wstring Utf8ToWide(const std::string& utf8) {
   return wide;
 }
 
+std::string WideToUtf8(const std::wstring& wide) {
+  if (wide.empty()) {
+    return std::string();
+  }
+  int size = WideCharToMultiByte(CP_UTF8, 0, wide.c_str(),
+                                 static_cast<int>(wide.size()), nullptr, 0,
+                                 nullptr, nullptr);
+  std::string utf8(static_cast<size_t>(size), '\0');
+  WideCharToMultiByte(CP_UTF8, 0, wide.c_str(), static_cast<int>(wide.size()),
+                      utf8.data(), size, nullptr, nullptr);
+  return utf8;
+}
+
+void ReadStringField(const EncodableMap& map, const char* key,
+                     std::string* out) {
+  auto it = map.find(EncodableValue(key));
+  if (it != map.end()) {
+    if (const auto* value = std::get_if<std::string>(&it->second)) {
+      *out = *value;
+    }
+  }
+}
+
+void ReadBoolField(const EncodableMap& map, const char* key, bool* out) {
+  auto it = map.find(EncodableValue(key));
+  if (it != map.end()) {
+    if (const auto* value = std::get_if<bool>(&it->second)) {
+      *out = *value;
+    }
+  }
+}
+
 int32_t GetInt(const EncodableMap& map, const char* key) {
   auto it = map.find(EncodableValue(key));
   if (it == map.end()) {
@@ -50,18 +82,9 @@ MascotMenuItem ParseMenuItem(const EncodableMap& map) {
       item.label = Utf8ToWide(*label);
     }
   }
-  auto checked_it = map.find(EncodableValue("checked"));
-  if (checked_it != map.end()) {
-    if (const auto* checked = std::get_if<bool>(&checked_it->second)) {
-      item.checked = *checked;
-    }
-  }
-  auto separator_it = map.find(EncodableValue("separator"));
-  if (separator_it != map.end()) {
-    if (const auto* separator = std::get_if<bool>(&separator_it->second)) {
-      item.separator = *separator;
-    }
-  }
+  ReadBoolField(map, "checked", &item.checked);
+  ReadBoolField(map, "separator", &item.separator);
+  ReadStringField(map, "id", &item.id);
   auto children_it = map.find(EncodableValue("children"));
   if (children_it != map.end()) {
     if (const auto* children =
@@ -187,56 +210,14 @@ void FlutterWindow::RegisterMascotChannel() {
                     std::get_if<EncodableList>(&items_it->second)) {
               for (const EncodableValue& entry : *list) {
                 if (const auto* item = std::get_if<EncodableMap>(&entry)) {
-                  MascotWindows::MenuItem out;
-                  auto label_it = item->find(EncodableValue("label"));
-                  if (label_it != item->end()) {
-                    if (const auto* label =
-                            std::get_if<std::string>(&label_it->second)) {
-                      out.label = Utf8ToWide(*label);
-                    }
-                  }
-                  auto checked_it = item->find(EncodableValue("checked"));
-                  if (checked_it != item->end()) {
-                    if (const auto* checked =
-                            std::get_if<bool>(&checked_it->second)) {
-                      out.checked = *checked;
-                    }
-                  }
-                  auto separator_it = item->find(EncodableValue("separator"));
-                  if (separator_it != item->end()) {
-                    if (const auto* separator =
-                            std::get_if<bool>(&separator_it->second)) {
-                      out.separator = *separator;
-                    }
-                  }
-                  auto children_it = item->find(EncodableValue("children"));
-                  if (children_it != item->end()) {
-                    if (const auto* children =
-                            std::get_if<EncodableList>(&children_it->second)) {
-                      out.children =
-                          std::make_shared<std::vector<MascotMenuItem>>();
-                      for (const EncodableValue& child : *children) {
-                        if (const auto* child_map =
-                                std::get_if<EncodableMap>(&child)) {
-                          out.children->push_back(
-                              ParseMenuItem(*child_map));
-                        }
-                      }
-                    }
-                  }
-                  items.push_back(std::move(out));
+                  items.push_back(ParseMenuItem(*item));
                 }
               }
             }
           }
           std::wstring selected =
               MascotWindows::Instance().ShowContextMenu(id, x, y, items);
-          std::string selected_utf8;
-          selected_utf8.reserve(selected.size());
-          for (wchar_t wc : selected) {
-            selected_utf8.push_back(static_cast<char>(wc));
-          }
-          result->Success(EncodableValue(selected_utf8));
+          result->Success(EncodableValue(WideToUtf8(selected)));
           return;
         }
         result->NotImplemented();

@@ -246,6 +246,13 @@ class ShimejiApp {
       return _bundleForTag(osTag ?? '', fallback: null) ??
           LanguageBundle.load('$confDirectory/language.properties');
     }
+    // First-launch files may hold the raw OS locale ('ko-KR'); normalize it
+    // to a supported tag so checkmarks and dropdowns always match
+    // availableLanguages(). Unsupported tags fall back to system language.
+    settings.language = _availableTagFor(settings.language) ?? '';
+    if (settings.language.isEmpty) {
+      return _loadLanguageBundle();
+    }
     _effectiveSystemTag = null;
     return _bundleForTag(settings.language);
   }
@@ -399,7 +406,12 @@ class ShimejiApp {
     return result;
   }
 
+  /// The single sync point for every settings mutation (settings screen,
+  /// tray menu, mascot context menu): applies runtime side effects, persists
+  /// to disk, then broadcasts so all surfaces rebuild consistently.
   void saveSettings() {
+    Sounds.enabled = settings.sounds;
+    environment.refreshCache();
     try {
       settings.save(settingsFile);
     } catch (_) {}
