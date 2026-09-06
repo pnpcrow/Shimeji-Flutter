@@ -94,9 +94,12 @@ class _ActionEntry {
   _ActionEntry(this.entry, this.action);
 }
 
-/// Builds a labeled entry for a group child (id assigned by the builder).
-NativeMenuEntry _label(String text) =>
-    NativeMenuEntry.label(text, id: 'group-child');
+/// Group child entries get placeholder ids; addSubmenu re-keys them.
+NativeMenuEntry _label(String text, {bool checked = false}) =>
+    NativeMenuEntry.label(text, id: 'child', checked: checked);
+
+NativeMenuEntry _labeled(String text, {bool checked = false}) =>
+    _label(text, checked: checked);
 
 /// Mutable builder: assigns each selectable item a unique id, registers its
 /// action in a map keyed by that id, and records the nested entries.
@@ -192,6 +195,37 @@ List<NativeMenuEntry> buildContextMenu(ShimejiApp app, dynamic mascot) {
       final items = groups[groupKey];
       if (items == null || items.isEmpty) continue;
       builder.addSubmenu(lang.getString(groupKey), items);
+    }
+
+    // Allowed Behaviours: toggleable behaviors with checkmarks.
+    final toggleEntries = <_ActionEntry>[];
+    for (final behaviorName in configuration.behaviorNames) {
+      if (!configuration.isBehaviorToggleable(behaviorName)) continue;
+      if (behaviorName.contains('/')) continue;
+      final enabled = configuration.isBehaviorEnabled(behaviorName, mascot);
+      final displayName = lang.containsKey(behaviorName)
+          ? lang.getString(behaviorName)
+          : splitCamelCase(behaviorName);
+      toggleEntries.add(_ActionEntry(
+          _labeled(displayName, checked: enabled), () {
+        final disabled = app.settings.disabledBehaviors[mascot.imageSet] ?? [];
+        final newDisabled = <String>[...disabled];
+        if (enabled) {
+          newDisabled.add(behaviorName);
+        } else {
+          newDisabled.remove(behaviorName);
+        }
+        if (newDisabled.isEmpty) {
+          app.settings.disabledBehaviors.remove(mascot.imageSet);
+        } else {
+          app.settings.disabledBehaviors[mascot.imageSet] = newDisabled;
+        }
+        app.saveSettings();
+      }));
+    }
+    if (toggleEntries.isNotEmpty) {
+      builder.addSeparator();
+      builder.addSubmenu(lang.getString('AllowedBehaviours'), toggleEntries);
     }
   }
 
