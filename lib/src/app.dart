@@ -56,7 +56,9 @@ class ShimejiApp {
   // Startup
   // -------------------------------------------------------------------------
 
-  Future<void> run() async {
+  /// Fast startup phase: paths, settings, language, hooks and environment.
+  /// The tray menu can be shown right after this returns.
+  Future<void> prepare() async {
     _resolveAppRoot();
     await _extractAssets();
 
@@ -74,12 +76,15 @@ class ShimejiApp {
     ShimejiEnvironmentHolder.instance = environment;
 
     environment.init();
+  }
 
+  /// Slow startup phase: parse configurations, decode poses and spawn the
+  /// initial mascots.
+  Future<void> loadConfigurationsAndSpawn() async {
     // Load active image set configurations.
     await _configurationLoadLoop();
 
     manager.onExitOnLastRemoved = exit;
-    manager.start();
 
     // Spawn one mascot per active image set (Java Main.run).
     for (final imageSet in settings.activeImageSets) {
