@@ -14,6 +14,18 @@ using flutter::EncodableValue;
 
 const char kChannelName[] = "shimeji/mascots";
 
+std::wstring Utf8ToWide(const std::string& utf8) {
+  if (utf8.empty()) {
+    return std::wstring();
+  }
+  int size = MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(),
+                                 static_cast<int>(utf8.size()), nullptr, 0);
+  std::wstring wide(static_cast<size_t>(size), L'\0');
+  MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), static_cast<int>(utf8.size()),
+                      wide.data(), size);
+  return wide;
+}
+
 int32_t GetInt(const EncodableMap& map, const char* key) {
   auto it = map.find(EncodableValue(key));
   if (it == map.end()) {
@@ -142,7 +154,7 @@ void FlutterWindow::RegisterMascotChannel() {
                   if (label_it != item->end()) {
                     if (const auto* label =
                             std::get_if<std::string>(&label_it->second)) {
-                      out.label = std::wstring(label->begin(), label->end());
+                      out.label = Utf8ToWide(*label);
                     }
                   }
                   auto checked_it = item->find(EncodableValue("checked"));
