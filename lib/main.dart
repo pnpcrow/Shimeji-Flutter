@@ -72,6 +72,11 @@ Future<void> _runEngine() async {
     mascot.animating = false;
     try {
       final entries = buildContextMenu(app, mascot);
+      // ignore: avoid_print
+      print('MENU ids built: '
+          '${[for (final e in entries) e.id]}');
+      // ignore: avoid_print
+      print('MENU action keys: ${mascot.contextMenuActions.keys.toList()}');
       final selectedId = await MascotNativeWindows.showContextMenu(
         id: mascot.id,
         x: physicalX,
@@ -94,6 +99,9 @@ Future<void> _runEngine() async {
   app.onOpenSettings = () async {
     settingsOpen.value = true;
     await app_window.AppWindow.showSettingsWindow();
+  };
+  app.onOpenImageSetChooser = () {
+    settingsOpen.value = true;
   };
   app_window.AppWindow.onSettingsClosed = () => settingsOpen.value = false;
 
@@ -163,6 +171,86 @@ void _tick(ShimejiApp app) {
 }
 
 SystemTray? _systemTray;
+
+/// Builds the tray menu entries with the same id-keyed contract as the
+/// mascot context menu. Shown through the native popup at the cursor.
+List<NativeMenuEntry> _buildTrayEntries() {
+  final app = ShimejiApp.instance;
+  final lang = app.languageBundle;
+  final settings = app.settings;
+  final firstSet = settings.activeImageSets.isNotEmpty
+      ? settings.activeImageSets.first
+      : null;
+  final entries = <NativeMenuEntry>[];
+  final actions = <String, void Function()>{};
+  var seq = 0;
+  String nextId() => 'tray-${seq++}';
+
+  void addItem(String label, void Function() action, {bool checked = false}) {
+    final id = nextId();
+    entries.add(NativeMenuEntry.label(label, id: id, checked: checked));
+    actions[id] = action;
+  }
+
+  void addSep() => entries.add(const NativeMenuEntry.separator());
+
+  addItem(lang.getString('CallShimeji'), () {
+    if (firstSet != null) app.createMascot(firstSet);
+  });
+  addItem(lang.getString('FollowCursor'), () {
+    if (firstSet == null) return;
+    final configuration = app.configurationFor(firstSet);
+    if (configuration != null) {
+      app.manager.setBehaviorAllFor(configuration, 'ChaseMouse', firstSet);
+    }
+  });
+  addItem(lang.getString('ReduceToOne'),
+      () => app.manager.remainOne());
+  addItem(lang.getString('RestoreWindows'),
+      () => app.environment.restoreWindows());
+  addSep();
+  addItem(lang.getString('ChooseShimeji'),
+      () => app.onOpenImageSetChooser!());
+  addItem(lang.getString('Settings'), () => app.onOpenSettings!());
+  addSep();
+  for (final spec in [
+    (lang.getString('Breeding'), () => settings.breeding = !settings.breeding,
+        () => settings.breeding),
+    (lang.getString('Transients'), () => settings.transients = !settings.transients,
+        () => settings.transients),
+    (lang.getString('Transformation'),
+        () => settings.transformation = !settings.transformation,
+        () => settings.transformation),
+    (lang.getString('ThrowingWindows'),
+        () => settings.throwing = !settings.throwing, () => settings.throwing),
+    (lang.getString('SoundEffects'), () => settings.sounds = !settings.sounds,
+        () => settings.sounds),
+    (lang.getString('Multiscreen'),
+        () => settings.multiscreen = !settings.multiscreen,
+        () => settings.multiscreen),
+  ]) {
+    final getValue = spec.$3;
+    addItem(spec.$1, () {
+      spec.$2();
+      app.saveSettings();
+      _rebuildTrayMenu();
+    }, checked: getValue());
+  }
+  addSep();
+  addItem(
+      app.manager.isPaused
+          ? lang.getString('ResumeAnimations')
+          : lang.getString('PauseAnimations'),
+      () {
+        app.manager.togglePauseAll();
+      });
+  addSep();
+  addItem(lang.getString('DismissAll'), () => app.exit());
+  addSep();
+  addItem('Exit', () => app.exit());
+
+  return entries;
+}
 
 Future<void> _setupTray() async {
   final tray = SystemTray();

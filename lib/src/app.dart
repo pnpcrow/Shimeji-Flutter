@@ -69,6 +69,9 @@ class ShimejiApp {
   /// Opens the settings screen (host window + UI), wired by the UI layer.
   void Function()? onOpenSettings;
 
+  /// Opens the image set chooser UI, wired by the UI layer.
+  void Function()? onOpenImageSetChooser;
+
   /// Broadcasts that settings changed. Called by EVERY surface that mutates
   /// settings (settings screen, tray menu, mascot context menu); listeners
   /// (tray rebuild, settings screen refresh) react in one place.

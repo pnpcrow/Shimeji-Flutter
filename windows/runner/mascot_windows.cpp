@@ -190,24 +190,10 @@ std::wstring MascotWindows::ShowContextMenu(
   }
   DestroyMenu(menu);
 
-  // Resolve the selected command id back to its stable item id.
-  for (const MenuItem& item : items) {
-    if (item.separator) {
-      continue;
-    }
-    if (item.native_command_id == selected) {
-      return Utf8ToWide(item.id);
-    }
-    if (!item.children) {
-      continue;
-    }
-    for (const MenuItem& child : *item.children) {
-      if (child.native_command_id == selected) {
-        return Utf8ToWide(child.id);
-      }
-    }
-  }
-  return std::wstring();
+  // Trace: which command id did the user pick?
+  fwprintf(stderr, L"[menu] selected command_id=%d\n", selected);
+  fflush(stderr);
+ return std::wstring();
 }
 
 void MascotWindows::AppendItems(HMENU menu, std::vector<MenuItem>& items,
