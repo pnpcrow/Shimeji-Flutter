@@ -52,6 +52,9 @@ class ShimejiApp {
   VoidCallback? onRefreshUi;
   void Function()? onAppExit;
 
+  /// Opens the settings screen (host window + UI), wired by the UI layer.
+  void Function()? onOpenSettings;
+
   // -------------------------------------------------------------------------
   // Startup
   // -------------------------------------------------------------------------

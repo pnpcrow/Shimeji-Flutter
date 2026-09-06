@@ -86,6 +86,10 @@ Future<void> _runEngine() async {
     await MascotNativeWindows.destroyAll();
     exit(0);
   };
+  app.onOpenSettings = () async {
+    settingsOpen.value = true;
+    await app_window.AppWindow.showSettingsWindow();
+  };
   app_window.AppWindow.onSettingsClosed = () => settingsOpen.value = false;
 
   // Fast phase first so the tray icon appears immediately: even if the
@@ -150,12 +154,17 @@ Future<void> _setupTray() async {
   try {
     await tray.initSystemTray(
       title: 'Shimeji Flutter',
-      iconPath: '${ShimejiApp.instance.appRoot}icon.ico',
+      iconPath: _trayIconPath(),
     );
-  } catch (_) {
+  } catch (e) {
+    // The tray is the emergency control surface; make failures visible.
+    // ignore: avoid_print
+    print('Tray init failed (icon: ${_trayIconPath()}): $e');
     _systemTray = null;
     return;
   }
+  // ignore: avoid_print
+  print('Tray initialized');
   tray.registerSystemTrayEventHandler((eventName) {
     if (eventName == kSystemTrayEventClick ||
         eventName == kSystemTrayEventRightClick) {
@@ -169,6 +178,14 @@ Future<void> _rebuildTrayMenu() async {
   if (_systemTray != null) {
     await _buildTrayMenu(_systemTray!);
   }
+}
+
+/// Absolute path of the tray icon next to the executable.
+String _trayIconPath() {
+  final root = ShimejiApp.instance.appRoot;
+  final separator =
+      root.endsWith('/') || root.endsWith(Platform.pathSeparator) ? '' : Platform.pathSeparator;
+  return '$root$separator' 'icon.ico';
 }
 
 Future<void> _buildTrayMenu(SystemTray tray) async {

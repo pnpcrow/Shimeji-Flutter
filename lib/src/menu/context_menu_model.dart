@@ -62,6 +62,10 @@ List<NativeMenuEntry> buildContextMenu(ShimejiApp app, dynamic mascot) {
   );
   add(NativeMenuEntry.label(lang.getString('RestoreWindows')),
       () => mascot.environment.restoreIE());
+  if (app.onOpenSettings != null) {
+    add(NativeMenuEntry.label(lang.getString('Settings')),
+        () => app.onOpenSettings!());
+  }
   // RevealStatistics opens the Java DebugWindow; the headless port has no
   // stats surface, so the entry is omitted.
 
