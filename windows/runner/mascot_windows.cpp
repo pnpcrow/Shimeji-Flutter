@@ -10,6 +10,19 @@ constexpr wchar_t kMascotClassName[] = L"SHIMEJI_MASCOT_WINDOW";
 
 bool g_class_registered = false;
 
+// The channel delivers UTF-8; menu text needs UTF-16.
+std::wstring Utf8ToWide(const std::string& utf8) {
+  if (utf8.empty()) {
+    return std::wstring();
+  }
+  int size = MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(),
+                                 static_cast<int>(utf8.size()), nullptr, 0);
+  std::wstring wide(static_cast<size_t>(size), L'\0');
+  MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), static_cast<int>(utf8.size()),
+                      wide.data(), size);
+  return wide;
+}
+
 }  // namespace
 
 MascotWindows& MascotWindows::Instance() {
