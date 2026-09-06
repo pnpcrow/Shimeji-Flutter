@@ -8,7 +8,7 @@
 library;
 
 import 'dart:async';
-import 'dart:io' show exit;
+import 'dart:io' show Platform, exit;
 
 import 'package:flutter/material.dart';
 import 'package:system_tray/system_tray.dart';
@@ -16,14 +16,43 @@ import 'package:system_tray/system_tray.dart';
 import 'src/app.dart';
 import 'src/manager.dart';
 import 'src/menu/context_menu_model.dart';
+import 'src/native/app_window.dart' as app_window;
 import 'src/native/mascot_windows.dart';
+import 'src/ui/settings_screen.dart';
+
+final ValueNotifier<bool> settingsOpen = ValueNotifier<bool>(false);
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // The engine is headless; the widget tree only satisfies the binding.
-  runApp(const SizedBox.shrink());
+  // The engine is headless; the widget tree hosts the optional settings
+  // screen inside the (normally hidden) host window.
+  runApp(const ShimejiFlutterApp());
   unawaited(_runEngine());
+}
+
+class ShimejiFlutterApp extends StatelessWidget {
+  const ShimejiFlutterApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData.light(useMaterial3: true),
+      home: ValueListenableBuilder<bool>(
+        valueListenable: settingsOpen,
+        builder: (context, open, _) => open
+            ? SettingsScreen(
+                app: ShimejiApp.instance,
+                onClose: () async {
+                  settingsOpen.value = false;
+                  await app_window.AppWindow.hideSettingsWindow();
+                },
+              )
+            : const SizedBox.shrink(),
+      ),
+    );
+  }
 }
 
 int _tickCount = 0;
@@ -57,9 +86,22 @@ Future<void> _runEngine() async {
     await MascotNativeWindows.destroyAll();
     exit(0);
   };
+  app_window.AppWindow.onSettingsClosed = () => settingsOpen.value = false;
 
-  await app.run();
+  // Fast phase first so the tray icon appears immediately: even if the
+  // screen ever ends up covered, the app stays controllable and can be
+  // exited from the tray.
+  await app.prepare();
   await _setupTray();
+
+  // Slow phase: parse configurations, decode poses, spawn mascots.
+  await app.loadConfigurationsAndSpawn();
+
+  // Convenience: open the settings screen right after startup.
+  if (Platform.environment['SHIMEJI_OPEN_SETTINGS'] == '1') {
+    settingsOpen.value = true;
+    await app_window.AppWindow.showSettingsWindow();
+  }
 
   Timer.periodic(const Duration(milliseconds: Manager.tickInterval), (_) {
     _tick(app);
@@ -164,6 +206,13 @@ Future<void> _buildTrayMenu(SystemTray tray) async {
       onClicked: (item) => app.environment.restoreWindows(),
     ),
     MenuSeparator(),
+    MenuItemLabel(
+      label: lang.getString('Settings'),
+      onClicked: (item) async {
+        settingsOpen.value = true;
+        await app_window.AppWindow.showSettingsWindow();
+      },
+    ),
     SubMenu(
       label: lang.getString('ChooseShimeji'),
       children: [
@@ -264,6 +313,12 @@ Future<void> _buildTrayMenu(SystemTray tray) async {
     ),
     MenuItemLabel(
       label: lang.getString('DismissAll'),
+      onClicked: (item) => app.exit(),
+    ),
+    MenuSeparator(),
+    // Always-available escape hatch, independent of any on-screen mascot.
+    MenuItemLabel(
+      label: 'Exit',
       onClicked: (item) => app.exit(),
     ),
   ]);
