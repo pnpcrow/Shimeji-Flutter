@@ -408,6 +408,11 @@ Future<void> _buildTrayMenu(SystemTray tray) async {
         await app_window.AppWindow.showSettingsWindow();
       },
     ),
+    MenuSeparator(),
+    MenuItemLabel(
+      label: lang.getString('Exit'),
+      onClicked: (item) => app.exit(),
+    ),
   ]);
   await tray.setContextMenu(menu);
 }
