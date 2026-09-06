@@ -14,10 +14,15 @@ class SettingsScreen extends StatefulWidget {
   final ShimejiApp app;
   final VoidCallback onClose;
 
+  /// Fired right after the language is changed inside this screen, so the
+  /// tray menu and other surfaces rebuild in sync.
+  final VoidCallback? onLanguageChanged;
+
   const SettingsScreen({
     super.key,
     required this.app,
     required this.onClose,
+    this.onLanguageChanged,
   });
 
   @override
@@ -58,6 +63,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void dispose() {
     interactiveWindows.dispose();
     super.dispose();
+  }
+
+  /// Applies the language immediately (bundle reload + persistence) and
+  /// notifies the tray so both surfaces stay in sync.
+  void _changeLanguage(String tag) {
+    setState(() => language = tag);
+    widget.app.setLanguage(tag);
+    widget.app.saveSettings();
+    widget.onLanguageChanged?.call();
   }
 
   void _applyAndClose() {

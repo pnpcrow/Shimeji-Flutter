@@ -43,11 +43,13 @@ class ShimejiFlutterApp extends StatelessWidget {
         valueListenable: settingsOpen,
         builder: (context, open, _) => open
             ? SettingsScreen(
+                key: ValueKey('settings-${ShimejiApp.instance.effectiveLanguageTag}'),
                 app: ShimejiApp.instance,
                 onClose: () async {
                   settingsOpen.value = false;
                   await app_window.AppWindow.hideSettingsWindow();
                 },
+                onLanguageChanged: () => _rebuildTrayMenu(),
               )
             : const SizedBox.shrink(),
       ),
