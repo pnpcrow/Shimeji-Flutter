@@ -214,8 +214,8 @@ List<NativeMenuEntry> buildContextMenu(ShimejiApp app, dynamic mascot) {
     builder.addItem(lang.getString('Settings'), () => app.onOpenSettings!());
   }
 
-  // The native layer numbers selectable entries depth-first; register the
-  // actions in that same order so selection indices map correctly.
-  mascot.contextMenuActions = builder.actions;
+  // The builder registered every action under its stable id; the native
+  // layer echoes that id back on selection.
+  mascot.contextMenuActions.addAll(builder.actions);
   return builder.entries;
 }
