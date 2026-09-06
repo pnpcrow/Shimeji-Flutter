@@ -62,12 +62,9 @@ List<NativeMenuEntry> buildContextMenu(ShimejiApp app, dynamic mascot) {
   );
   add(NativeMenuEntry.label(lang.getString('RestoreWindows')),
       () => mascot.environment.restoreIE());
-  if (app.onOpenSettings != null) {
-    add(NativeMenuEntry.label(lang.getString('Settings')),
-        () => app.onOpenSettings!());
-  }
   // RevealStatistics opens the Java DebugWindow; the headless port has no
-  // stats surface, so the entry is omitted.
+  // stats surface, so the entry is omitted. Settings lives in its own group
+  // at the very bottom of the menu.
 
   if (configuration != null) {
     for (final behaviorName in configuration.behaviorNames) {
@@ -123,6 +120,13 @@ List<NativeMenuEntry> buildContextMenu(ShimejiApp app, dynamic mascot) {
   add(NativeMenuEntry.label(lang.getString('DismissAllOthers')),
       () => app.manager.remainOneMascot(mascot));
   add(NativeMenuEntry.label(lang.getString('DismissAll')), () => app.exit());
+
+  // Settings in its own group at the bottom (below the dismiss family).
+  add(const NativeMenuEntry.separator(), null);
+  if (app.onOpenSettings != null) {
+    add(NativeMenuEntry.label(lang.getString('Settings')),
+        () => app.onOpenSettings!());
+  }
 
   // The native layer returns a positional index; expose the actions in the
   // same order through the app-level hook.
