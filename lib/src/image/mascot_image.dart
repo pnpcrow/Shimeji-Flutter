@@ -1,6 +1,7 @@
 /// Port of `image/MascotImage.java` and `image/ImagePair.java`.
 library;
 
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 /// A mascot frame: the image plus the anchor point inside it (the point that
@@ -13,6 +14,10 @@ class MascotImage {
   final int anchorX;
   final int anchorY;
   final bool flipped;
+
+  /// Straight (non-premultiplied) RGBA bytes of [image], retained for the
+  /// native per-mascot layered-window presentation path.
+  final Uint8List rgba;
 
   /// Coarse alpha grid (8x8-pixel cells, row-major) used for hit testing:
   /// true where any pixel of the cell is opaque.
@@ -29,6 +34,7 @@ class MascotImage {
     required this.alphaMask,
     required this.maskCols,
     required this.maskRows,
+    required this.rgba,
     this.flipped = false,
   });
 
@@ -80,6 +86,7 @@ class MascotImage {
       alphaMask: mask,
       maskCols: cols,
       maskRows: rows,
+      rgba: Uint8List.fromList(bytes),
       flipped: flipped,
     );
   }

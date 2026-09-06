@@ -86,6 +86,7 @@ class ImagePairs {
         alphaMask: left.alphaMask,
         maskCols: left.maskCols,
         maskRows: left.maskRows,
+        rgba: left.rgba,
         flipped: true,
       );
     } else {
