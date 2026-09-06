@@ -131,7 +131,7 @@ bool Win32Window::Create(const std::wstring& title,
   // Frameless, borderless overlay; geometry is in physical pixels and must
   // not be DPI-scaled (the Dart side works in physical coordinates).
   HWND window = CreateWindowEx(
-      WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST | WS_EX_LAYERED,
+      WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST,
       window_class, title.c_str(), WS_POPUP,
       origin.x, origin.y, size.width, size.height,
       nullptr, nullptr, GetModuleHandle(nullptr), this);
@@ -139,13 +139,6 @@ bool Win32Window::Create(const std::wstring& title,
   if (!window) {
     return false;
   }
-
-  // Color-key transparency: every pure-magenta pixel of the Flutter content
-  // becomes fully transparent AND click-through (per-pixel, like the Java
-  // original's per-pixel-alpha windows). Magenta never appears in shimeji
-  // art, and this works in remote desktop sessions where DWM accent-based
-  // transparency does not.
-  SetLayeredWindowAttributes(window, RGB(255, 0, 255), 0, LWA_COLORKEY);
 
   UpdateTheme(window);
 
