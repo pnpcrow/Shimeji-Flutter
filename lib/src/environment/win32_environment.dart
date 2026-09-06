@@ -37,6 +37,9 @@ class WindowsEnvironment extends AbstractEnvironment {
 
   @override
   void tick() {
+    // Refresh the cursor first: input polling and the engine read it this
+    // tick (the Java original updated it inside AbstractEnvironment.tick).
+    pollCursor();
     super.tick();
     final prevWindowId = getActiveWindowId();
     _windowTitles = interactiveWindows();
