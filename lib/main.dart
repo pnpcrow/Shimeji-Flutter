@@ -252,7 +252,8 @@ Future<void> _buildTrayMenu(SystemTray tray) async {
       children: [
         MenuItemCheckbox(
           label: app.systemLanguageLabel,
-          checked: settings.language.isEmpty,
+          checked: app.effectiveLanguageTag.isEmpty ||
+              settings.language.isEmpty,
           onClicked: (item) {
             app.setLanguage('');
             _rebuildTrayMenu();
@@ -261,7 +262,8 @@ Future<void> _buildTrayMenu(SystemTray tray) async {
         for (final tag in app.availableLanguages())
           MenuItemCheckbox(
             label: app.languageDisplayName(tag),
-            checked: settings.language == tag,
+            checked: app.effectiveLanguageTag == tag &&
+                settings.language.isNotEmpty,
             onClicked: (item) {
               app.setLanguage(tag);
               _rebuildTrayMenu();

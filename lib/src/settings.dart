@@ -206,6 +206,32 @@ class Settings {
 /// Reads a commented `#key=value` hint from a properties file without
 /// loading it as a live key (the stock language files keep LanguageName
 /// commented out).
+/// BCP-47 language-subtag display names for bundles that ship no
+/// `#LanguageName=` hint (the stock files only cover 7 of 21 languages).
+const Map<String, String> kLanguageNames = {
+  'ar': 'العربية',
+  'ca': 'Català',
+  'de': 'Deutsch',
+  'en': 'English',
+  'es': 'Español',
+  'fi': 'Suomi',
+  'fr': 'Français',
+  'hr': 'Hrvatski',
+  'it': 'Italiano',
+  'ja': '日本語',
+  'ko': '한국어(Korean)',
+  'nl': 'Nederlands',
+  'pl': 'Polski',
+  'pt-BR': 'Português Brasileiro',
+  'pt-PT': 'Português',
+  'ro': 'Română',
+  'ru': 'ру́сский язы́к',
+  'sr': 'Srpski',
+  'vi': 'Tiếng Việt',
+  'zh': '简体中文',
+  'zh-TW': '繁體中文',
+};
+
 String? peekCommentedValue(String path, String key) {
   try {
     final file = File(path);

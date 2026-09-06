@@ -48,6 +48,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     multiscreen = settings.multiscreen;
     scaling = settings.scaling;
     opacity = settings.opacity;
+    // Reflect the language actually in effect: '' when following the system.
     language = settings.language;
     interactiveWindows =
         TextEditingController(text: settings.interactiveWindows.join('/'));
@@ -122,7 +123,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   style: Theme.of(context).textTheme.titleMedium),
               const SizedBox(height: 6),
               DropdownButtonFormField<String>(
-                value: language.isEmpty ? '' : language,
+                value: language,
                 items: [
                   DropdownMenuItem(
                     value: '',

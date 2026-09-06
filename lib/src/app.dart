@@ -182,14 +182,18 @@ class ShimejiApp {
     return tags;
   }
 
-  /// Switches the UI language at runtime (tray Language submenu). An empty
-  /// tag means "follow the system language".
+  /// Switches the UI language at runtime (tray Language submenu, settings
+  /// screen). An empty tag means "follow the system language". This is the
+  /// single source of truth: both menus rebuild from
+  /// [currentLanguageTag]/[effectiveLanguageTag].
   void setLanguage(String tag) {
     settings.language = tag;
     if (tag.isEmpty) {
       final osTag = _availableTagFor(_osLanguageTag());
+      _effectiveSystemTag = osTag;
       languageBundle = _bundleForTag(osTag ?? '', fallback: languageBundle);
     } else {
+      _effectiveSystemTag = null;
       languageBundle = _bundleForTag(tag, fallback: languageBundle);
     }
     onRefreshUi?.call();
@@ -212,6 +216,13 @@ class ShimejiApp {
   LanguageBundle _loadLanguageBundle() {
     // Java loads a ResourceBundle for the current locale; fall back to the
     // base English bundle.
+    if (settings.language.isEmpty) {
+      final osTag = _availableTagFor(_osLanguageTag());
+      _effectiveSystemTag = osTag;
+      return _bundleForTag(osTag ?? '', fallback: null) ??
+          LanguageBundle.load('$confDirectory/language.properties');
+    }
+    _effectiveSystemTag = null;
     return _bundleForTag(settings.language);
   }
 
@@ -387,6 +398,17 @@ class ShimejiApp {
     if (value != 'LanguageName') return value;
     return tag;
   }
+
+  /// The language tag currently in effect ('' while following the system).
+  String get currentLanguageTag => settings.language;
+
+  /// The tag whose bundle is actually loaded right now ('' if none matched).
+  String get effectiveLanguageTag {
+    if (settings.language.isEmpty) return _effectiveSystemTag ?? '';
+    return settings.language;
+  }
+
+  String? _effectiveSystemTag;
 
   /// Label of the "system language" entry in the language menus, e.g.
   /// "System language (한국어)" when the OS locale is ko.
