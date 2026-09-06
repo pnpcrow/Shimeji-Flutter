@@ -74,6 +74,10 @@ class Settings {
     informationDismissed = getStringList('InformationDismissed', '/');
 
     language = getProperty('Language', '');
+    if (language.isEmpty) {
+      // First launch: follow the OS locale like Java's Locale.getDefault.
+      language = Platform.localeName;
+    }
     disabledBehaviors.clear();
     for (final key in _properties.keys) {
       if (key.startsWith('DisabledBehaviours.') &&
@@ -199,6 +203,28 @@ class Settings {
 }
 
 /// Minimal Java-`.properties` resource bundle reader for the language files.
+/// Reads a commented `#key=value` hint from a properties file without
+/// loading it as a live key (the stock language files keep LanguageName
+/// commented out).
+String? peekCommentedValue(String path, String key) {
+  try {
+    final file = File(path);
+    if (!file.existsSync()) return null;
+    for (final rawLine in const LineSplitter().convert(file.readAsStringSync())) {
+      final line = rawLine.trim();
+      final prefix = '#$key=';
+      if (line.startsWith(prefix)) {
+        var value = line.substring(prefix.length).trim();
+        value = value.replaceAllMapped(RegExp(r'\u([0-9a-fA-F]{4})'), (m) {
+          return String.fromCharCode(int.parse(m.group(1)!, radix: 16));
+        });
+        return value;
+      }
+    }
+  } catch (_) {}
+  return null;
+}
+
 class LanguageBundle {
   final Map<String, String> _values;
 

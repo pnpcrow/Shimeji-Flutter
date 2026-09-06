@@ -170,7 +170,7 @@ class ShimejiApp {
     final tags = <String>[];
     final dir = Directory(confDirectory);
     if (!dir.existsSync()) return tags;
-    final pattern = RegExp(r'^language_([a-zA-Z_-]+)\.properties\$');
+    final pattern = RegExp('^language_([a-zA-Z_-]+)[.]properties\$');
     for (final file in dir.listSync()) {
       if (file is! File) continue;
       final match = pattern.firstMatch(file.path.split(Platform.pathSeparator).last);
@@ -375,12 +375,16 @@ class ShimejiApp {
   // Mascots
   // -------------------------------------------------------------------------
 
-  /// Human-readable name for a language tag, resolved through its bundle.
+  /// Human-readable name for a language tag. The stock bundles keep the
+  /// native name only in a commented `#LanguageName=` hint, so that is read
+  /// too; the tag itself is the last resort.
   String languageDisplayName(String tag) {
-    final bundle = LanguageBundle.load(
-        '$confDirectory/language_${tag.replaceAll('-', '_')}.properties');
-    final native = bundle.getString('LanguageName');
-    if (native != 'LanguageName') return native;
+    final fileName = '$confDirectory/language_${tag.replaceAll('-', '_')}.properties';
+    final native = peekCommentedValue(fileName, 'LanguageName');
+    if (native != null && native.trim().isNotEmpty) return native.trim();
+    final bundle = LanguageBundle.load(fileName);
+    final value = bundle.getString('LanguageName');
+    if (value != 'LanguageName') return value;
     return tag;
   }
 
