@@ -105,6 +105,11 @@ Future<void> _runEngine() async {
   // Slow phase: parse configurations, decode poses, spawn mascots.
   await app.loadConfigurationsAndSpawn();
 
+  // Any settings change anywhere (settings screen, mascot context menu)
+  // broadcasts through the notifier; the tray menu rebuilds itself here so
+  // labels and checkmarks can never drift out of sync.
+  SettingsChangeNotifier.instance.addListener(_onSettingsBroadcast);
+
   // Convenience: open the settings screen right after startup.
   if (Platform.environment['SHIMEJI_OPEN_SETTINGS'] == '1') {
     settingsOpen.value = true;
@@ -114,6 +119,12 @@ Future<void> _runEngine() async {
   Timer.periodic(const Duration(milliseconds: Manager.tickInterval), (_) {
     _tick(app);
   });
+}
+
+void _onSettingsBroadcast() {
+  // ignore: avoid_print
+  print('BROADCAST received -> rebuilding tray menu');
+  _rebuildTrayMenu();
 }
 
 void _tick(ShimejiApp app) {
@@ -179,6 +190,8 @@ Future<void> _setupTray() async {
 }
 
 Future<void> _rebuildTrayMenu() async {
+  // ignore: avoid_print
+  print('TRAY rebuild requested');
   if (_systemTray == null) {
     // ignore: avoid_print
     print('TRAY rebuild skipped: tray is null');

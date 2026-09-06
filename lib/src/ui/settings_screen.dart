@@ -3,6 +3,10 @@
 /// Covers the rendering-mode selection, language, sprite scaling/opacity,
 /// the behavior toggles from the original tray and the interactive-window
 /// title rules of the Java original's SettingsWindow.
+///
+/// Sync contract: every option change applies immediately and broadcasts
+/// through [SettingsChangeNotifier]; the tray rebuilds from the same signal,
+/// and changes made in the tray refresh this screen via the same notifier.
 library;
 
 import 'package:flutter/material.dart';
@@ -44,6 +48,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void initState() {
     super.initState();
+    _refreshFromSettings();
+    // Reflect the language actually in effect: '' when following the system.
+    language = widget.app.settings.language;
+    interactiveWindows = TextEditingController(
+        text: widget.app.settings.interactiveWindows.join('/'));
+    // External changes (tray, context menu) refresh this screen live.
+    SettingsChangeNotifier.instance.addListener(_onSettingsBroadcast);
+  }
+
+  @override
+  void dispose() {
+    SettingsChangeNotifier.instance.removeListener(_onSettingsBroadcast);
+    interactiveWindows.dispose();
+    super.dispose();
+  }
+
+  /// Called when settings changed on another surface (tray, context menu):
+  /// refresh every field and the localized labels.
+  void _onSettingsBroadcast() {
+    if (!mounted) return;
+    setState(() {
+      language = widget.app.effectiveLanguageTag;
+      _refreshFromSettings();
+    });
+  }
+
+  void _refreshFromSettings() {
     final settings = widget.app.settings;
     breeding = settings.breeding;
     transients = settings.transients;
@@ -53,23 +84,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     multiscreen = settings.multiscreen;
     scaling = settings.scaling;
     opacity = settings.opacity;
-    // Reflect the language actually in effect: '' when following the system.
-    language = settings.language;
-    interactiveWindows =
-        TextEditingController(text: settings.interactiveWindows.join('/'));
-  }
-
-  @override
-  void dispose() {
-    interactiveWindows.dispose();
-    super.dispose();
   }
 
   /// Applies the language immediately (bundle reload + persistence) and
-  /// notifies the tray so both surfaces stay in sync.
+  /// broadcasts so the tray and other surfaces stay in sync.
   void _changeLanguage(String tag) {
-    // ignore: avoid_print
-    print('SETTINGS _changeLanguage($tag)');
     setState(() => language = tag);
     widget.app.setLanguage(tag);
     widget.app.saveSettings();
@@ -94,6 +113,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     widget.app.environment.refreshCache();
     widget.app.setLanguage(language);
     widget.app.saveSettings();
+    widget.onLanguageChanged?.call();
     widget.onClose();
   }
 
@@ -139,7 +159,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   style: Theme.of(context).textTheme.titleMedium),
               const SizedBox(height: 6),
               DropdownButtonFormField<String>(
-                value: language,
+                value: language.isEmpty ? '' : language,
                 items: [
                   DropdownMenuItem(
                     value: '',
@@ -151,8 +171,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       child: Text(widget.app.languageDisplayName(tag)),
                     ),
                 ],
-                onChanged: (value) =>
-                    setState(() => language = value ?? language),
+                onChanged: (value) {
+                  if (value == null || value == language) return;
+                  _changeLanguage(value);
+                },
               ),
               const Divider(height: 28),
               Text('Sprites / 스프라이트',

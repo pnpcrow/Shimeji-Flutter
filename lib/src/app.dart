@@ -6,6 +6,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:win32/win32.dart' show GetAsyncKeyState, VK_LBUTTON, VK_RBUTTON;
 import 'package:xml/xml.dart';
@@ -24,10 +25,23 @@ import 'mascot.dart';
 import 'settings.dart';
 import 'sound/sounds.dart';
 
+export 'settings.dart' show LanguageBundle;
+
+/// Central change notification for settings-driven UI surfaces (tray menu,
+/// settings screen, context menus). Everything rebuilds when this fires,
+/// so no surface can drift out of sync with another.
+final class SettingsChangeNotifier extends ChangeNotifier {
+  static final SettingsChangeNotifier instance = SettingsChangeNotifier();
+
+  void notify() => notifyListeners();
+}
+
 class ShimejiApp {
   static final ShimejiApp instance = ShimejiApp._();
 
   ShimejiApp._();
+
+  /// Broadcasts that settings changed. See [SettingsChangeNotifier].
 
   late Settings settings;
   late LanguageBundle languageBundle;
@@ -54,6 +68,14 @@ class ShimejiApp {
 
   /// Opens the settings screen (host window + UI), wired by the UI layer.
   void Function()? onOpenSettings;
+
+  /// Broadcasts that settings changed. Called by EVERY surface that mutates
+  /// settings (settings screen, tray menu, mascot context menu); listeners
+  /// (tray rebuild, settings screen refresh) react in one place.
+  void broadcastSettingsChanged() {
+    SettingsChangeNotifier.instance.notify();
+  }
+
 
   // -------------------------------------------------------------------------
   // Startup
@@ -193,6 +215,7 @@ class ShimejiApp {
       languageBundle = _bundleForTag(tag, fallback: languageBundle);
     }
     onRefreshUi?.call();
+    broadcastSettingsChanged();
   }
 
   LanguageBundle _bundleForTag(String tag, {LanguageBundle? fallback}) {
@@ -375,6 +398,7 @@ class ShimejiApp {
     try {
       settings.save(settingsFile);
     } catch (_) {}
+    broadcastSettingsChanged();
   }
 
   void _saveSettings() => saveSettings();
