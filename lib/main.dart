@@ -43,16 +43,12 @@ class ShimejiFlutterApp extends StatelessWidget {
         valueListenable: settingsOpen,
         builder: (context, open, _) => open
             ? SettingsScreen(
+                // Rebuilt on language switches so labels follow the bundle.
                 key: ValueKey('settings-${ShimejiApp.instance.effectiveLanguageTag}'),
                 app: ShimejiApp.instance,
                 onClose: () async {
                   settingsOpen.value = false;
                   await app_window.AppWindow.hideSettingsWindow();
-                },
-                onLanguageChanged: () {
-                  // ignore: avoid_print
-                  print('SETTINGS language changed -> rebuilding tray');
-                  _rebuildTrayMenu();
                 },
               )
             : const SizedBox.shrink(),
@@ -414,11 +410,6 @@ Future<void> _buildTrayMenu(SystemTray tray) async {
         settingsOpen.value = true;
         await app_window.AppWindow.showSettingsWindow();
       },
-    ),
-    // Always-available escape hatch, independent of any on-screen mascot.
-    MenuItemLabel(
-      label: 'Exit',
-      onClicked: (item) => app.exit(),
     ),
   ]);
   await tray.setContextMenu(menu);

@@ -168,7 +168,25 @@ class ShimejiApp {
         }
         final relative = asset.substring('assets/'.length);
         final target = File('$appRoot/$relative');
-        if (target.existsSync()) continue;
+        if (target.existsSync()) {
+          // Language files are app-owned (users edit settings.properties and
+          // img/, not the bundles): refresh them when the bundled copy
+          // changed so translation fixes reach existing installs.
+          final isLanguageFile = relative.startsWith('conf/language') &&
+              relative.endsWith('.properties');
+          if (!isLanguageFile) continue;
+          final bundled = await rootBundle.load(asset);
+          final data = bundled.buffer.asUint8List();
+          var identical = false;
+          try {
+            final current = await target.readAsBytes();
+            identical =
+                current.length == data.length && _bytesEqual(current, data);
+          } catch (_) {}
+          if (identical) continue;
+          await target.writeAsBytes(data, flush: true);
+          continue;
+        }
         target.parent.createSync(recursive: true);
         final data = await rootBundle.load(asset);
         await target.writeAsBytes(data.buffer.asUint8List(), flush: true);
@@ -184,6 +202,13 @@ class ShimejiApp {
         await icon.writeAsBytes(data.buffer.asUint8List(), flush: true);
       } catch (_) {}
     }
+  }
+
+  static bool _bytesEqual(Uint8List a, Uint8List b) {
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
   }
 
   /// Languages with a translation in conf/ (BCP-47-ish tags).
@@ -424,18 +449,36 @@ class ShimejiApp {
   // Mascots
   // -------------------------------------------------------------------------
 
-  /// Human-readable name for a language tag. The stock bundles keep the
-  /// native name only in a commented `#LanguageName=` hint, so that is read
-  /// too; the tag itself is the last resort.
+  /// Human-readable name for a language tag: the curated standard native
+  /// name first, then the bundle's `#LanguageName=` hint, then the tag.
   String languageDisplayName(String tag) {
-    final fileName = '$confDirectory/language_${tag.replaceAll('-', '_')}.properties';
+    final curated = _curatedLanguageName(tag);
+    if (curated != null) return curated;
+    final fileName =
+        '$confDirectory/language_${tag.replaceAll('-', '_')}.properties';
     final native = peekCommentedValue(fileName, 'LanguageName');
-    if (native != null && native.trim().isNotEmpty) return native.trim();
+    if (native != null && native.trim().isNotEmpty) {
+      return _stripCodeSuffix(native.trim());
+    }
     final bundle = LanguageBundle.load(fileName);
     final value = bundle.getString('LanguageName');
-    if (value != 'LanguageName') return value;
+    if (value != 'LanguageName') return _stripCodeSuffix(value);
     return tag;
   }
+
+  /// Case-insensitive lookup in [kLanguageNames] ('pt-br' -> 'pt-BR').
+  String? _curatedLanguageName(String tag) {
+    for (final entry in kLanguageNames.entries) {
+      if (entry.key.toLowerCase() == tag.toLowerCase()) return entry.value;
+    }
+    return null;
+  }
+
+  /// Drops a trailing parenthesized code/English gloss from a display name,
+  /// e.g. '한국어(Korean)' -> '한국어', so no raw code ever shows in the UI.
+  String _stripCodeSuffix(String name) => name
+      .replaceFirst(RegExp(r'\s*\([A-Za-z][A-Za-z-]*\)\s*$'), '')
+      .trim();
 
   /// The language tag currently in effect ('' while following the system).
   String get currentLanguageTag => settings.language;
@@ -449,14 +492,15 @@ class ShimejiApp {
   String? _effectiveSystemTag;
 
   /// Label of the "system language" entry in the language menus, e.g.
-  /// "System language (한국어)" when the OS locale is ko.
+  /// "System language (한국어)" when the OS locale is ko. Locales without a
+  /// matching bundle show no code — just the plain label.
   String get systemLanguageLabel {
-    final tag = _osLanguageTag();
-    final name = _availableTagFor(tag);
+    final base = languageBundle.getString('SystemLanguage');
+    final name = _availableTagFor(_osLanguageTag());
     if (name != null) {
-      return 'System language (${languageDisplayName(name)})';
+      return '$base (${languageDisplayName(name)})';
     }
-    return 'System language (${tag.isEmpty ? 'default' : tag})';
+    return base;
   }
 
   /// Best matching supported tag for the OS locale, or null.

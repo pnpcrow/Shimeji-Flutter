@@ -32,7 +32,7 @@ class AppWindow {
   }
 
   static Future<void> showSettingsWindow(
-      {int width = 980, int height = 720}) async {
+      {int width = 460, int height = 640}) async {
     _ensureHandler();
     try {
       await _channel.invokeMethod('showSettingsWindow', {
@@ -47,6 +47,15 @@ class AppWindow {
   static Future<void> hideSettingsWindow() async {
     try {
       await _channel.invokeMethod('hideSettingsWindow');
+    } on PlatformException {
+      // Ignore.
+    }
+  }
+
+  /// Starts a native window-move gesture (used by the chromeless header).
+  static Future<void> beginWindowDrag() async {
+    try {
+      await _channel.invokeMethod('beginWindowDrag');
     } on PlatformException {
       // Ignore.
     }

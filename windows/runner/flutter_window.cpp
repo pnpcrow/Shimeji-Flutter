@@ -1,5 +1,6 @@
 #include "flutter_window.h"
 
+#include <dwmapi.h>
 #include <flutter/standard_method_codec.h>
 #include <optional>
 
@@ -188,14 +189,19 @@ void FlutterWindow::RegisterMascotChannel() {
         if (method_name == "showSettingsWindow") {
           int width = GetInt(map, "width");
           int height = GetInt(map, "height");
-          if (width <= 0) width = 980;
-          if (height <= 0) height = 720;
+          if (width <= 0) width = 460;
+          if (height <= 0) height = 640;
           ShowSettingsWindow(width, height);
           result->Success();
           return;
         }
         if (method_name == "hideSettingsWindow") {
           HideSettingsWindow();
+          result->Success();
+          return;
+        }
+        if (method_name == "beginWindowDrag") {
+          BeginWindowDrag();
           result->Success();
           return;
         }
@@ -228,21 +234,43 @@ void FlutterWindow::ShowSettingsWindow(int width, int height) {
   settings_visible_ = true;
   HWND hwnd = GetHandle();
 
+  // Chromeless: no title bar or caption; the Flutter UI draws its own
+  // header and close button. WS_THICKFRAME keeps edge resizing.
   LONG_PTR style = GetWindowLongPtr(hwnd, GWL_STYLE);
-  style &= ~WS_POPUP;
-  style |= WS_OVERLAPPEDWINDOW | WS_VISIBLE;
+  style &= ~WS_OVERLAPPEDWINDOW;
+  style |= WS_POPUP | WS_THICKFRAME | WS_VISIBLE;
   SetWindowLongPtr(hwnd, GWL_STYLE, style);
   LONG_PTR ex_style = GetWindowLongPtr(hwnd, GWL_EXSTYLE);
   ex_style &= ~(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST);
   SetWindowLongPtr(hwnd, GWL_EXSTYLE, ex_style);
+
+  // The Dart side sends logical (96-dpi) units; scale them to the monitor.
+  UINT dpi = GetDpiForWindow(hwnd);
+  if (dpi == 0) dpi = 96;
+  width = MulDiv(width, static_cast<int>(dpi), 96);
+  height = MulDiv(height, static_cast<int>(dpi), 96);
 
   const int screen_w = GetSystemMetrics(SM_CXSCREEN);
   const int screen_h = GetSystemMetrics(SM_CYSCREEN);
   SetWindowPos(hwnd, HWND_TOP, (screen_w - width) / 2,
                (screen_h - height) / 2, width, height,
                SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+
+  // Round the corners on Windows 11; older systems ignore the attribute.
+  DWM_WINDOW_CORNER_PREFERENCE preference = DWMWCP_ROUND;
+  DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &preference,
+                        sizeof(preference));
+
   ShowWindow(hwnd, SW_SHOW);
   SetForegroundWindow(hwnd);
+}
+
+void FlutterWindow::BeginWindowDrag() {
+  // Hand the mouse to the non-client move loop so the Flutter header can
+  // drag the chromeless window.
+  HWND hwnd = GetHandle();
+  ReleaseCapture();
+  SendMessage(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0);
 }
 
 void FlutterWindow::HideSettingsWindow() {

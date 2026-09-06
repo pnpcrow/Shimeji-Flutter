@@ -28,9 +28,11 @@ class FlutterWindow : public Win32Window {
   void RegisterMascotChannel();
 
   // Settings-screen host window management: reveals the (normally hidden)
-  // host window as a regular dialog-sized window, and hides it again.
+  // host window as a chromeless dialog (the Flutter UI draws its own
+  // header), hides it again, and lets the Flutter header drag it.
   void ShowSettingsWindow(int width, int height);
   void HideSettingsWindow();
+  void BeginWindowDrag();
 
   bool settings_visible() const { return settings_visible_; }
 

@@ -1,33 +1,33 @@
-/// The settings screen, shown in the (previously hidden) host window.
+/// The settings screen, shown in the chromeless host window.
 ///
-/// Covers the rendering-mode selection, language, sprite scaling/opacity,
-/// the behavior toggles from the original tray and the interactive-window
-/// title rules of the Java original's SettingsWindow.
+/// Every control applies its change immediately — state, persistence and the
+/// [SettingsChangeNotifier] broadcast happen on the spot, so mascots, the
+/// tray and every other surface pick the change up without a Save action.
+/// There is no Save button; the window is closed from its own header.
 ///
 /// Sync contract: every option change applies immediately and broadcasts
 /// through [SettingsChangeNotifier]; the tray rebuilds from the same signal,
 /// and changes made in the tray refresh this screen via the same notifier.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../app.dart';
 import '../settings.dart' show Settings;
+import '../native/app_window.dart';
 import '../native/mascot_windows.dart';
 
 class SettingsScreen extends StatefulWidget {
   final ShimejiApp app;
   final VoidCallback onClose;
 
-  /// Fired right after the language is changed inside this screen, so the
-  /// tray menu and other surfaces rebuild in sync.
-  final VoidCallback? onLanguageChanged;
-
   const SettingsScreen({
     super.key,
     required this.app,
     required this.onClose,
-    this.onLanguageChanged,
   });
 
   @override
@@ -45,6 +45,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late double opacity;
   late String language;
   late TextEditingController interactiveWindows;
+  Timer? _interactiveDebounce;
   List<String> imageSets = [];
 
   @override
@@ -64,6 +65,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void dispose() {
     SettingsChangeNotifier.instance.removeListener(_onSettingsBroadcast);
+    _interactiveDebounce?.cancel();
+    // Flush an uncommitted interactive-window edit (window closed while the
+    // debounce was still pending) so closing never loses input.
+    final parsed = interactiveWindows.text
+        .split('/')
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .toList();
+    if (widget.app.settings.interactiveWindows.join('/') != parsed.join('/')) {
+      widget.app.settings.interactiveWindows = parsed;
+      widget.app.saveSettings();
+    }
     interactiveWindows.dispose();
     super.dispose();
   }
@@ -97,14 +110,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
     opacity = settings.opacity;
   }
 
-  /// Applies a boolean option immediately (state + persist + broadcast) so
-  /// the tray and mascots pick it up without pressing Save. Runtime side
-  /// effects (Sounds.enabled, environment caches) are applied centrally by
-  /// [ShimejiApp.saveSettings].
-  void _applyToggle(
-      void Function(Settings s) apply, void Function() updateLocal) {
+  /// Applies one option immediately: mutates settings, persists to disk and
+  /// broadcasts so the tray and mascots pick the change up at once. Runtime
+  /// side effects (Sounds.enabled, environment caches) are applied centrally
+  /// by [ShimejiApp.saveSettings].
+  void _apply(void Function(Settings s) apply) {
     apply(widget.app.settings);
-    updateLocal();
     widget.app.saveSettings();
   }
 
@@ -114,7 +125,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() => language = tag);
     widget.app.setLanguage(tag);
     widget.app.saveSettings();
-    widget.onLanguageChanged?.call();
   }
 
   /// Chooser: adds/removes an image set and respawns the mascots. The
@@ -132,164 +142,138 @@ class _SettingsScreenState extends State<SettingsScreen> {
     MascotNativeWindows.clearCache();
   }
 
-  /// Commits the text field and the scaling slider (the only Save-only
-  /// controls; everything else already applied itself) and closes.
-  void _applyAndClose() {
-    widget.app.settings.scaling = scaling;
-    widget.app.settings.interactiveWindows = interactiveWindows.text
-        .split('/')
-        .where((s) => s.trim().isNotEmpty)
-        .toList();
-    widget.app.setLanguage(language);
-    widget.app.saveSettings();
-    widget.onLanguageChanged?.call();
-    widget.onClose();
+  /// Commits the interactive-window field live (debounced while typing) so
+  /// mascots start interacting with matching windows without a save action.
+  void _onInteractiveWindowsChanged() {
+    _interactiveDebounce?.cancel();
+    _interactiveDebounce = Timer(const Duration(milliseconds: 400), () {
+      if (!mounted) return;
+      widget.app.settings.interactiveWindows = interactiveWindows.text
+          .split('/')
+          .map((s) => s.trim())
+          .where((s) => s.isNotEmpty)
+          .toList();
+      widget.app.saveSettings();
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     final lang = widget.app.languageBundle;
     final languages = widget.app.availableLanguages();
-    return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F7),
-      appBar: AppBar(
-        title: Text(lang.getString('Settings')),
-        actions: [
-          TextButton(
-            onPressed: _applyAndClose,
-            child: const Text('Save'),
-          ),
-          IconButton(
-            icon: const Icon(Icons.close),
-            onPressed: widget.onClose,
-          ),
-        ],
-      ),
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 560),
-          child: ListView(
-            padding: const EdgeInsets.all(20),
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.escape): widget.onClose,
+      },
+      child: Focus(
+        autofocus: true,
+        child: Scaffold(
+          backgroundColor: const Color(0xFFFAF9F7),
+          body: Column(
             children: [
-              Text('Rendering mode',
-                  style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 6),
-              RadioListTile<String>(
-                dense: true,
-                value: 'legacy',
-                groupValue: widget.app.settings.renderingMode,
-                onChanged: (_) {},
-                title: const Text('Legacy (레거시)'),
-                subtitle: const Text(
-                    '마스코트마다 네이티브 픽셀 알파 윈도우 (원본 Java 아키텍처)'),
-              ),
-              const Divider(height: 28),
-              Text('Language / 언어',
-                  style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 6),
-              DropdownButtonFormField<String>(
-                value: language.isEmpty ? '' : language,
-                items: [
-                  DropdownMenuItem(
-                    value: '',
-                    child: Text(widget.app.systemLanguageLabel),
-                  ),
-                  for (final tag in languages)
-                    DropdownMenuItem(
-                      value: tag,
-                      child: Text(widget.app.languageDisplayName(tag)),
+              _buildHeader(lang),
+              const Divider(height: 1),
+              Expanded(
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 420),
+                    child: ListView(
+                      padding: const EdgeInsets.fromLTRB(20, 4, 20, 28),
+                      children: [
+                        _section(lang.getString('Language')),
+                        DropdownButtonFormField<String>(
+                          // Re-keyed on language switches (own or from the
+                          // tray) so the rebuilt field shows the new choice.
+                          key: ValueKey(language),
+                          initialValue: language.isEmpty ? '' : language,
+                          isDense: true,
+                          borderRadius: BorderRadius.circular(10),
+                          items: [
+                            DropdownMenuItem(
+                              value: '',
+                              child: Text(widget.app.systemLanguageLabel),
+                            ),
+                            for (final tag in languages)
+                              DropdownMenuItem(
+                                value: tag,
+                                child:
+                                    Text(widget.app.languageDisplayName(tag)),
+                              ),
+                          ],
+                          onChanged: (value) {
+                            if (value == null || value == language) return;
+                            _changeLanguage(value);
+                          },
+                        ),
+                        _section(lang.getString('ImageSets')),
+                        if (imageSets.isEmpty)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 6),
+                            child: Text(lang.getString('NoImageSetsFound'),
+                                style: _mutedStyle),
+                          ),
+                        for (final set in imageSets)
+                          CheckboxListTile(
+                            dense: true,
+                            contentPadding: EdgeInsets.zero,
+                            visualDensity: VisualDensity.compact,
+                            value:
+                                widget.app.settings.activeImageSets.contains(set),
+                            title: Text(set, style: _rowStyle),
+                            onChanged: (_) => _toggleImageSet(set),
+                          ),
+                        _section(lang.getString('Scaling')),
+                        _sliderValueRow(lang.getString('Scaling'),
+                            '${scaling.toStringAsFixed(2)}x'),
+                        Slider(
+                          min: 0.25,
+                          max: 4,
+                          divisions: 15,
+                          value: scaling,
+                          onChanged: (v) => setState(() => scaling = v),
+                          onChangeEnd: (v) =>
+                              _apply((s) => s.scaling = v),
+                        ),
+                        _sliderValueRow(lang.getString('Opacity'),
+                            '${(opacity * 100).round()}%'),
+                        Slider(
+                          min: 0.1,
+                          max: 1,
+                          divisions: 9,
+                          value: opacity,
+                          onChanged: (v) => setState(() => opacity = v),
+                          onChangeEnd: (v) => _apply((s) => s.opacity = v),
+                        ),
+                        _section(lang.getString('General')),
+                        _switch(lang.getString('Breeding'), breeding,
+                            (v) => _apply((s) => s.breeding = v)),
+                        _switch(lang.getString('Transients'), transients,
+                            (v) => _apply((s) => s.transients = v)),
+                        _switch(lang.getString('Transformation'), transformation,
+                            (v) => _apply((s) => s.transformation = v)),
+                        _switch(lang.getString('ThrowingWindows'), throwing,
+                            (v) => _apply((s) => s.throwing = v)),
+                        _switch(lang.getString('SoundEffects'), sounds,
+                            (v) => _apply((s) => s.sounds = v)),
+                        _switch(lang.getString('Multiscreen'), multiscreen,
+                            (v) => _apply((s) => s.multiscreen = v)),
+                        _section(lang.getString('InteractiveWindows')),
+                        TextField(
+                          controller: interactiveWindows,
+                          onChanged: (_) => _onInteractiveWindowsChanged(),
+                          decoration: InputDecoration(
+                            isDense: true,
+                            hintText:
+                                lang.getString('InteractiveWindowsHint'),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
-                ],
-                onChanged: (value) {
-                  if (value == null || value == language) return;
-                  _changeLanguage(value);
-                },
-              ),
-              const Divider(height: 28),
-              Text('Image sets / 이미지 세트',
-                  style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 6),
-              if (imageSets.isEmpty)
-                const Text('No image sets found.'),
-              for (final set in imageSets)
-                CheckboxListTile(
-                  dense: true,
-                  value: widget.app.settings.activeImageSets.contains(set),
-                  title: Text(set),
-                  onChanged: (_) => _toggleImageSet(set),
+                  ),
                 ),
-              const Divider(height: 28),
-              Text('Sprites / 스프라이트',
-                  style: Theme.of(context).textTheme.titleMedium),
-              Text('Scaling: ${scaling.toStringAsFixed(2)}x  (새 이미지 로딩 시 적용)'),
-              Slider(
-                min: 0.25,
-                max: 4,
-                divisions: 15,
-                value: scaling,
-                onChanged: (v) => setState(() => scaling = v),
-              ),
-              Text('Opacity: ${(opacity * 100).round()}%'),
-              Slider(
-                min: 0.1,
-                max: 1,
-                divisions: 9,
-                value: opacity,
-                onChanged: (v) => setState(() => opacity = v),
-                onChangeEnd: (v) => _applyToggle(
-                    (s) => s.opacity = v, () => opacity = v),
-              ),
-              const Divider(height: 28),
-              Text('Behaviors / 행동',
-                  style: Theme.of(context).textTheme.titleMedium),
-              _check(lang.getString('Breeding'), breeding, (v) {
-                final next = v ?? breeding;
-                _applyToggle((s) => s.breeding = next,
-                    () => breeding = next);
-              }),
-              _check(lang.getString('Transients'), transients, (v) {
-                final next = v ?? transients;
-                _applyToggle((s) => s.transients = next,
-                    () => transients = next);
-              }),
-              _check(lang.getString('Transformation'), transformation, (v) {
-                final next = v ?? transformation;
-                _applyToggle((s) => s.transformation = next,
-                    () => transformation = next);
-              }),
-              _check(lang.getString('ThrowingWindows'), throwing, (v) {
-                final next = v ?? throwing;
-                _applyToggle((s) => s.throwing = next,
-                    () => throwing = next);
-              }),
-              _check(lang.getString('SoundEffects'), sounds, (v) {
-                final next = v ?? sounds;
-                _applyToggle((s) => s.sounds = next, () => sounds = next);
-              }),
-              _check(lang.getString('Multiscreen'), multiscreen, (v) {
-                final next = v ?? multiscreen;
-                _applyToggle((s) => s.multiscreen = next,
-                    () => multiscreen = next);
-              }),
-              const Divider(height: 28),
-              Text('Interactive windows (title substrings, / separated)',
-                  style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 6),
-              TextField(controller: interactiveWindows),
-              const SizedBox(height: 20),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  OutlinedButton(
-                    onPressed: widget.onClose,
-                    child: const Text('Cancel'),
-                  ),
-                  const SizedBox(width: 8),
-                  FilledButton(
-                    onPressed: _applyAndClose,
-                    child: const Text('Save & Close'),
-                  ),
-                ],
               ),
             ],
           ),
@@ -298,11 +282,71 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Widget _check(String label, bool value, ValueChanged<bool?> onChanged) {
-    return CheckboxListTile(
+  static const _rowStyle = TextStyle(fontSize: 14);
+  static const _mutedStyle =
+      TextStyle(fontSize: 13, color: Colors.black38);
+
+  /// Chromeless title bar: draggable everywhere except the close button,
+  /// which is the only window chrome the screen needs.
+  Widget _buildHeader(LanguageBundle lang) {
+    return GestureDetector(
+      onPanStart: (_) => AppWindow.beginWindowDrag(),
+      behavior: HitTestBehavior.opaque,
+      child: SizedBox(
+        height: 46,
+        child: Row(
+          children: [
+            const SizedBox(width: 20),
+            Text(
+              lang.getString('Settings'),
+              style: const TextStyle(
+                  fontSize: 15, fontWeight: FontWeight.w600),
+            ),
+            const Spacer(),
+            IconButton(
+              icon: const Icon(Icons.close, size: 20),
+              tooltip: lang.getString('Close'),
+              onPressed: widget.onClose,
+            ),
+            const SizedBox(width: 6),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _section(String label) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(2, 22, 2, 8),
+      child: Text(
+        label,
+        style: const TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          color: Colors.black45,
+          letterSpacing: 0.4,
+        ),
+      ),
+    );
+  }
+
+  Widget _sliderValueRow(String label, String value) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(label, style: _rowStyle),
+        Text(value, style: _mutedStyle),
+      ],
+    );
+  }
+
+  Widget _switch(String label, bool value, ValueChanged<bool> onChanged) {
+    return SwitchListTile(
       dense: true,
+      contentPadding: EdgeInsets.zero,
+      visualDensity: VisualDensity.compact,
       value: value,
-      title: Text(label),
+      title: Text(label, style: _rowStyle),
       onChanged: onChanged,
     );
   }
