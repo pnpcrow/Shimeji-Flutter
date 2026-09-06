@@ -76,6 +76,8 @@ class Settings {
     language = getProperty('Language', '');
     if (language.isEmpty) {
       // First launch: follow the OS locale like Java's Locale.getDefault.
+      // Keep the raw locale; the app resolves it against the available
+      // bundles and stores the normalized tag on the next save.
       language = Platform.localeName;
     }
     disabledBehaviors.clear();

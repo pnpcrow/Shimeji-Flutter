@@ -12,6 +12,7 @@ library;
 import 'package:flutter/material.dart';
 
 import '../app.dart';
+import '../settings.dart' show Settings;
 import '../native/app_window.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -84,6 +85,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
     multiscreen = settings.multiscreen;
     scaling = settings.scaling;
     opacity = settings.opacity;
+  }
+
+  /// Applies a boolean option immediately (state + persist + broadcast) so
+  /// the tray and mascots pick it up without pressing Save.
+  void _applyToggle(
+      void Function(Settings s) apply, void Function() updateLocal) {
+    apply(widget.app.settings);
+    updateLocal();
+    widget.app.environment.refreshCache();
+    widget.app.saveSettings();
   }
 
   /// Applies the language immediately (bundle reload + persistence) and
@@ -198,18 +209,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
               const Divider(height: 28),
               Text('Behaviors / 행동',
                   style: Theme.of(context).textTheme.titleMedium),
-              _check(lang.getString('Breeding'), breeding,
-                  (v) => setState(() => breeding = v ?? breeding)),
-              _check(lang.getString('Transients'), transients,
-                  (v) => setState(() => transients = v ?? transients)),
-              _check(lang.getString('Transformation'), transformation,
-                  (v) => setState(() => transformation = v ?? transformation)),
-              _check(lang.getString('ThrowingWindows'), throwing,
-                  (v) => setState(() => throwing = v ?? throwing)),
-              _check(lang.getString('SoundEffects'), sounds,
-                  (v) => setState(() => sounds = v ?? sounds)),
-              _check(lang.getString('Multiscreen'), multiscreen,
-                  (v) => setState(() => multiscreen = v ?? multiscreen)),
+              _check(lang.getString('Breeding'), breeding, (v) {
+                final next = v ?? breeding;
+                _applyToggle((s) => s.breeding = next,
+                    () => breeding = next);
+              }),
+              _check(lang.getString('Transients'), transients, (v) {
+                final next = v ?? transients;
+                _applyToggle((s) => s.transients = next,
+                    () => transients = next);
+              }),
+              _check(lang.getString('Transformation'), transformation, (v) {
+                final next = v ?? transformation;
+                _applyToggle((s) => s.transformation = next,
+                    () => transformation = next);
+              }),
+              _check(lang.getString('ThrowingWindows'), throwing, (v) {
+                final next = v ?? throwing;
+                _applyToggle((s) => s.throwing = next,
+                    () => throwing = next);
+              }),
+              _check(lang.getString('SoundEffects'), sounds, (v) {
+                final next = v ?? sounds;
+                _applyToggle((s) => s.sounds = next, () => sounds = next);
+              }),
+              _check(lang.getString('Multiscreen'), multiscreen, (v) {
+                final next = v ?? multiscreen;
+                _applyToggle((s) => s.multiscreen = next,
+                    () => multiscreen = next);
+              }),
               const Divider(height: 28),
               Text('Interactive windows (title substrings, / separated)',
                   style: Theme.of(context).textTheme.titleMedium),

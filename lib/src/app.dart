@@ -205,7 +205,9 @@ class ShimejiApp {
   /// single source of truth: both menus rebuild from
   /// [currentLanguageTag]/[effectiveLanguageTag].
   void setLanguage(String tag) {
-    settings.language = tag;
+    // Store the normalized supported tag ('ko-KR' -> 'ko') so checkmark
+    // comparisons against availableLanguages() always match.
+    settings.language = tag.isEmpty ? '' : (_availableTagFor(tag) ?? tag);
     if (tag.isEmpty) {
       final osTag = _availableTagFor(_osLanguageTag());
       _effectiveSystemTag = osTag;
