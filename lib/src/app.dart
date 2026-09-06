@@ -182,10 +182,16 @@ class ShimejiApp {
     return tags;
   }
 
-  /// Switches the UI language at runtime (tray Language submenu).
+  /// Switches the UI language at runtime (tray Language submenu). An empty
+  /// tag means "follow the system language".
   void setLanguage(String tag) {
     settings.language = tag;
-    languageBundle = _bundleForTag(tag, fallback: languageBundle);
+    if (tag.isEmpty) {
+      final osTag = _availableTagFor(_osLanguageTag());
+      languageBundle = _bundleForTag(osTag ?? '', fallback: languageBundle);
+    } else {
+      languageBundle = _bundleForTag(tag, fallback: languageBundle);
+    }
     onRefreshUi?.call();
   }
 
@@ -376,6 +382,49 @@ class ShimejiApp {
     final native = bundle.getString('LanguageName');
     if (native != 'LanguageName') return native;
     return tag;
+  }
+
+  /// Label of the "system language" entry in the language menus, e.g.
+  /// "System language (한국어)" when the OS locale is ko.
+  String get systemLanguageLabel {
+    final tag = _osLanguageTag();
+    final name = _availableTagFor(tag);
+    if (name != null) {
+      return 'System language (${languageDisplayName(name)})';
+    }
+    return 'System language (${tag.isEmpty ? 'default' : tag})';
+  }
+
+  /// Best matching supported tag for the OS locale, or null.
+  String? _availableTagFor(String tag) {
+    if (tag.isEmpty) return null;
+    final available = availableLanguages();
+    final normalized = tag.replaceAll('_', '-');
+    for (final candidate in available) {
+      if (candidate.toLowerCase() == normalized.toLowerCase()) {
+        return candidate;
+      }
+    }
+    final base = normalized.split('-').first.toLowerCase();
+    for (final candidate in available) {
+      if (candidate.split('-').first.toLowerCase() == base) {
+        return candidate;
+      }
+    }
+    return null;
+  }
+
+  String _osLanguageTag() {
+    // Windows locale names look like ko-KR or Korean_Korea; keep the
+    // language subtag (and region if present).
+    final locale = Platform.localeName.replaceAll('_', '-');
+    final parts = locale.split('.');
+    final cleaned = (parts.isNotEmpty ? parts.first : locale).trim();
+    final segments = cleaned.split('-');
+    if (segments.length >= 2) {
+      return '${segments[0]}-${segments[1]}';
+    }
+    return cleaned;
   }
 
   /// Spawns one more mascot of the given image set (menu "Call Another").

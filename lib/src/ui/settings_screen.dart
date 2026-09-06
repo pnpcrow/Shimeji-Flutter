@@ -122,15 +122,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   style: Theme.of(context).textTheme.titleMedium),
               const SizedBox(height: 6),
               DropdownButtonFormField<String>(
-                value: language.isEmpty ? 'en' : language,
+                value: language.isEmpty ? '' : language,
                 items: [
+                  DropdownMenuItem(
+                    value: '',
+                    child: Text(widget.app.systemLanguageLabel),
+                  ),
                   for (final tag in languages)
                     DropdownMenuItem(
                       value: tag,
                       child: Text(widget.app.languageDisplayName(tag)),
                     ),
                 ],
-                onChanged: (value) => setState(() => language = value ?? language),
+                onChanged: (value) =>
+                    setState(() => language = value ?? language),
               ),
               const Divider(height: 28),
               Text('Sprites / 스프라이트',

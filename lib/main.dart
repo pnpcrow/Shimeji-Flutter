@@ -223,13 +223,6 @@ Future<void> _buildTrayMenu(SystemTray tray) async {
       onClicked: (item) => app.environment.restoreWindows(),
     ),
     MenuSeparator(),
-    MenuItemLabel(
-      label: lang.getString('Settings'),
-      onClicked: (item) async {
-        settingsOpen.value = true;
-        await app_window.AppWindow.showSettingsWindow();
-      },
-    ),
     SubMenu(
       label: lang.getString('ChooseShimeji'),
       children: [
@@ -257,11 +250,18 @@ Future<void> _buildTrayMenu(SystemTray tray) async {
     SubMenu(
       label: lang.getString('Language'),
       children: [
+        MenuItemCheckbox(
+          label: app.systemLanguageLabel,
+          checked: settings.language.isEmpty,
+          onClicked: (item) {
+            app.setLanguage('');
+            _rebuildTrayMenu();
+          },
+        ),
         for (final tag in app.availableLanguages())
           MenuItemCheckbox(
             label: app.languageDisplayName(tag),
-            checked: settings.language == tag ||
-                (settings.language.isEmpty && tag == 'en'),
+            checked: settings.language == tag,
             onClicked: (item) {
               app.setLanguage(tag);
               _rebuildTrayMenu();
@@ -333,6 +333,13 @@ Future<void> _buildTrayMenu(SystemTray tray) async {
       onClicked: (item) => app.exit(),
     ),
     MenuSeparator(),
+    MenuItemLabel(
+      label: lang.getString('Settings'),
+      onClicked: (item) async {
+        settingsOpen.value = true;
+        await app_window.AppWindow.showSettingsWindow();
+      },
+    ),
     // Always-available escape hatch, independent of any on-screen mascot.
     MenuItemLabel(
       label: 'Exit',
