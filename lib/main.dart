@@ -188,11 +188,13 @@ String _trayIconPath() {
   return '$root$separator' 'icon.ico';
 }
 
+final Menu _sharedTrayMenu = Menu();
+
 Future<void> _buildTrayMenu(SystemTray tray) async {
   final app = ShimejiApp.instance;
   final lang = app.languageBundle;
   final settings = app.settings;
-  final menu = Menu();
+  final menu = _sharedTrayMenu;
   final firstSet = settings.activeImageSets.isNotEmpty
       ? settings.activeImageSets.first
       : null;
