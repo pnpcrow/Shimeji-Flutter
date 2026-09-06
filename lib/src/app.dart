@@ -16,13 +16,11 @@ import 'behavior/behavior_execution_exception.dart';
 import 'config/configuration.dart';
 import 'config/exceptions.dart';
 import 'environment/environment.dart';
-import 'image/mascot_image.dart' show MascotImage;
 import 'environment/win32_environment.dart';
 import 'image/hqx/hqx_scaler.dart';
 import 'image/image_pairs.dart';
 import 'manager.dart';
 import 'mascot.dart';
-import 'overlay/overlay_controller.dart';
 import 'settings.dart';
 import 'sound/sounds.dart';
 
@@ -351,11 +349,13 @@ class ShimejiApp {
     return result;
   }
 
-  void _saveSettings() {
+  void saveSettings() {
     try {
       settings.save(settingsFile);
     } catch (_) {}
   }
+
+  void _saveSettings() => saveSettings();
 
   // -------------------------------------------------------------------------
   // Mascots
@@ -422,8 +422,12 @@ class ShimejiApp {
   bool _lastRightDown = false;
   Mascot? _dragMascot;
 
+  /// True while a native context menu is open; input polling is suspended.
+  bool uiModal = false;
+
   /// Runs once per engine tick before the mascots tick.
   void pollInput() {
+    if (uiModal) return;
     final cursor = environment.getCursor();
     final leftDown =
         (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0; // VK_LBUTTON
@@ -457,17 +461,13 @@ class ShimejiApp {
       }
     }
 
-    if (rightDown && !_lastRightDown) {
-      // SHIMEJI_DEBUG_MENU=1 opens the first mascot's menu on any right
-      // click; a testing aid for environments where the mascots keep moving.
-      final debugMenu = Platform.environment['SHIMEJI_DEBUG_MENU'] == '1';
+    // The context menu opens on right-button RELEASE: opening it during the
+    // press makes the same button's release dismiss the menu instantly.
+    if (!rightDown && _lastRightDown) {
       if (mascotAtCursor != null && _dragMascot == null) {
         final bounds = mascotAtCursor.bounds;
         mascotAtCursor.mousePressed(
             true, cursor.x - bounds.x, cursor.y - bounds.y);
-      } else if (debugMenu && manager.mascots.isNotEmpty) {
-        final first = manager.mascots.first;
-        first.showPopup(cursor.x - first.bounds.x, cursor.y - first.bounds.y);
       }
     }
 
@@ -493,70 +493,6 @@ class ShimejiApp {
       }
     }
     return null;
-  }
-
-  // -------------------------------------------------------------------------
-  // Overlay synchronization
-  // -------------------------------------------------------------------------
-
-  final List<int> _lastRectSignature = [];
-
-  /// Pushes hit rects to the runner when the mascot layout changed.
-  Future<void> updateOverlayRects() async {
-    final rects = <HitRect>[];
-    final signature = <int>[];
-    for (final mascot in manager.mascots) {
-      final image = mascot.image;
-      if (image == null) continue;
-      final bounds = mascot.bounds;
-      signature
-        .addAll([bounds.x, bounds.y, bounds.width, bounds.height, image.width]);
-      rects.add(_hitRectFor(mascot));
-    }
-    if (_listEquals(signature, _lastRectSignature)) return;
-    _lastRectSignature
-      ..clear()
-      ..addAll(signature);
-    await OverlayController.setHitRects(rects);
-  }
-
-  HitRect _hitRectFor(Mascot mascot) {
-    final image = mascot.image!;
-    final bounds = mascot.bounds;
-    final cols = image.maskCols;
-    final rows = image.maskRows;
-    final maskBits = <int>[];
-    var current = 0;
-    var bitIndex = 0;
-    for (var i = 0; i < cols * rows; i++) {
-      if (i < image.alphaMask.length && image.alphaMask[i]) {
-        current |= 1 << (bitIndex % 32);
-      }
-      bitIndex++;
-      if (bitIndex % 32 == 0) {
-        maskBits.add(current);
-        current = 0;
-      }
-    }
-    if (bitIndex % 32 != 0) maskBits.add(current);
-    return HitRect(
-      x: bounds.x,
-      y: bounds.y,
-      width: bounds.width,
-      height: bounds.height,
-      maskCols: cols,
-      maskRows: rows,
-      cellSize: MascotImage.maskCellSize,
-      maskBits: maskBits,
-    );
-  }
-
-  static bool _listEquals(List<int> a, List<int> b) {
-    if (a.length != b.length) return false;
-    for (var i = 0; i < a.length; i++) {
-      if (a[i] != b[i]) return false;
-    }
-    return true;
   }
 }
 
