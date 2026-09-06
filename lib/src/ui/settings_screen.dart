@@ -68,6 +68,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   /// Applies the language immediately (bundle reload + persistence) and
   /// notifies the tray so both surfaces stay in sync.
   void _changeLanguage(String tag) {
+    // ignore: avoid_print
+    print('SETTINGS _changeLanguage($tag)');
     setState(() => language = tag);
     widget.app.setLanguage(tag);
     widget.app.saveSettings();

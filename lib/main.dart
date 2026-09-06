@@ -49,7 +49,11 @@ class ShimejiFlutterApp extends StatelessWidget {
                   settingsOpen.value = false;
                   await app_window.AppWindow.hideSettingsWindow();
                 },
-                onLanguageChanged: () => _rebuildTrayMenu(),
+                onLanguageChanged: () {
+                  // ignore: avoid_print
+                  print('SETTINGS language changed -> rebuilding tray');
+                  _rebuildTrayMenu();
+                },
               )
             : const SizedBox.shrink(),
       ),
@@ -175,9 +179,16 @@ Future<void> _setupTray() async {
 }
 
 Future<void> _rebuildTrayMenu() async {
-  if (_systemTray != null) {
-    await _buildTrayMenu(_systemTray!);
+  if (_systemTray == null) {
+    // ignore: avoid_print
+    print('TRAY rebuild skipped: tray is null');
+    return;
   }
+  // ignore: avoid_print
+  print('TRAY rebuilding (lang=${ShimejiApp.instance.effectiveLanguageTag})');
+  await _buildTrayMenu(_systemTray!);
+  // ignore: avoid_print
+  print('TRAY rebuild done');
 }
 
 /// Absolute path of the tray icon next to the executable.
