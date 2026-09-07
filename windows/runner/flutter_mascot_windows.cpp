@@ -187,6 +187,11 @@ bool FlutterMascotWindows::Update(int id, int x, int y, int w, int h,
   UINT flags = SWP_NOACTIVATE | SWP_NOZORDER;
   if (!IsWindowVisible(window.hwnd)) {
     flags |= SWP_SHOWWINDOW;
+    // Wake the engine's frame production when the window first becomes
+    // visible (vsync can stay paused for windows shown after creation).
+    if (window.controller != nullptr) {
+      window.controller->ForceRedraw();
+    }
   }
   SetWindowPos(window.hwnd, nullptr, x, y, w, h, flags);
   if (window.flutter_hwnd != nullptr) {

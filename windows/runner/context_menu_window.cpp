@@ -11,6 +11,7 @@ constexpr wchar_t kContextMenuClassName[] = L"SHIMEJI_FLUTTER_CONTEXT_MENU";
 
 bool g_context_menu_class_registered = false;
 
+
 // Effective DPI of the monitor containing |pt| (GetDpiForMonitor from
 // Shcore, loaded dynamically to avoid a header/link dependency). Falls
 // back to the DPI of |fallback_window|.
@@ -205,7 +206,7 @@ void ContextMenuWindow::EnsureCreated() {
         } else if (method == "setMenuSize") {
           if (menu_active_) {
             ApplySize(number_field("w"), number_field("h"),
-                      number_field("dpr"));
+                      number_field("dpr"), number_field("originOffsetX"));
           }
         } else if (method == "selected") {
           std::string id;
@@ -263,6 +264,8 @@ void ContextMenuWindow::Show(const flutter::EncodableList& items, int x, int y,
   }
 }
 
+
+
 void ContextMenuWindow::SendShow(const flutter::EncodableList& items) {
   if (channel_ == nullptr) {
     return;
@@ -282,12 +285,22 @@ void ContextMenuWindow::SendShow(const flutter::EncodableList& items) {
   args[flutter::EncodableValue("items")] = flutter::EncodableValue(items);
   args[flutter::EncodableValue("maxHeight")] =
       flutter::EncodableValue(max_height);
+  // Screen geometry (physical px) so the menu engine can decide whether the
+  // submenu column should expand to the left near the right work-area edge.
+  args[flutter::EncodableValue("anchorX")] =
+      flutter::EncodableValue(static_cast<int32_t>(anchor_x_));
+  if (GetMonitorInfo(monitor, &info)) {
+    args[flutter::EncodableValue("workLeft")] =
+        flutter::EncodableValue(static_cast<int32_t>(info.rcWork.left));
+    args[flutter::EncodableValue("workRight")] =
+        flutter::EncodableValue(static_cast<int32_t>(info.rcWork.right));
+  }
   channel_->InvokeMethod(
       "show", std::make_unique<flutter::EncodableValue>(args));
 }
 
 void ContextMenuWindow::ApplySize(double logical_w, double logical_h,
-                                  double dpr) {
+                                  double dpr, double origin_offset) {
   if (hwnd_ == nullptr || logical_w <= 0 || logical_h <= 0) {
     return;
   }
@@ -300,6 +313,9 @@ void ContextMenuWindow::ApplySize(double logical_w, double logical_h,
                      : DpiAtPoint(anchor, hwnd_) / 96.0;
   int w = static_cast<int>(logical_w * scale + 0.5);
   int h = static_cast<int>(logical_h * scale + 0.5);
+  // A left-expanding submenu shifts the window origin left (logical,
+  // negative) so the main column stays under the cursor.
+  int x = anchor_x_ + static_cast<int>(origin_offset * scale + 0.5);
 
   // Clamp against the work area of the monitor containing the anchor.
   HMONITOR monitor = MonitorFromPoint(anchor, MONITOR_DEFAULTTONEAREST);
@@ -314,7 +330,6 @@ void ContextMenuWindow::ApplySize(double logical_w, double logical_h,
   }
   w = std::min(w, static_cast<int>(work.right - work.left));
   h = std::min(h, static_cast<int>(work.bottom - work.top));
-  int x = anchor_x_;
   int y = anchor_y_;
   if (x + w > work.right) {
     x = work.right - w;

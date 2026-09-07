@@ -61,11 +61,38 @@ class ContextMenuWindowController {
   final ValueNotifier<List<FlutterMenuEntry>?> entries =
       ValueNotifier<List<FlutterMenuEntry>?>(null);
 
+  // Screen geometry of the current menu, in PHYSICAL pixels (sent by the
+  // native side with 'show'); used to decide the submenu direction.
+  int anchorX = 0;
+  int workLeft = 0;
+  int workRight = 0;
+  bool get hasWorkArea => workRight > workLeft;
+
+  /// The device pixel ratio of the last size report (reporter feedback).
+  double lastDpr = 0;
+
+  /// Increments on every 'show'; the size reporter re-reports once per
+  /// epoch even when the content lays out to an identical size.
+  int showEpoch = 0;
+
+  /// Width of the main column alone (logical), tracked from the collapsed
+  /// reports; lets the window keep the main column under the cursor when
+  /// the submenu expands to the left.
+  double mainColumnWidth = 0;
+
   Future<void> start() async {
     _channel.setMethodCallHandler((call) async {
       if (call.method == 'show') {
         final args = (call.arguments as Map?)?.cast<String, Object?>();
         final rawItems = args?['items'];
+        anchorX = ((args?['anchorX'] as num?) ?? 0).toInt();
+        workLeft = ((args?['workLeft'] as num?) ?? 0).toInt();
+        workRight = ((args?['workRight'] as num?) ?? 0).toInt();
+        // Bumped per open: re-showing the SAME mascot produces an
+        // identical entry tree, which would lay out to the exact same size
+        // and never send a new size report -- the window would stay
+        // work-area sized. The epoch forces one report per open.
+        showEpoch++;
         entries.value = rawItems is List
             ? rawItems.map(_parseEntry).whereType<FlutterMenuEntry>().toList()
             : null;
@@ -111,11 +138,25 @@ class ContextMenuWindowController {
   /// the engine rendered -- regardless of which monitor the window idled
   /// on before, or whether its metrics were still settling when the menu
   /// content first arrived.
-  void reportSize(Size logicalSize, double devicePixelRatio) {
+  ///
+  /// [submenuOpen]/[expandLeft] describe the layout: when the submenu
+  /// expands to the left, [originOffsetX] shifts the window origin left by
+  /// the submenu's share of the width so the main column stays under the
+  /// cursor.
+  void reportSize(Size logicalSize, double devicePixelRatio,
+      {required bool submenuOpen, required bool expandLeft}) {
+    lastDpr = devicePixelRatio;
+    var originOffset = 0.0;
+    if (!submenuOpen) {
+      mainColumnWidth = logicalSize.width;
+    } else if (expandLeft && mainColumnWidth > 0) {
+      originOffset = mainColumnWidth - logicalSize.width;
+    }
     _channel.invokeMethod('setMenuSize', {
       'w': logicalSize.width,
       'h': logicalSize.height,
       'dpr': devicePixelRatio,
+      'originOffsetX': originOffset,
     }).catchError((_) {});
   }
 }
@@ -164,27 +205,25 @@ class _ContextMenuWindowRootState extends State<ContextMenuWindowRoot>
         autofocus: true,
         child: Directionality(
           textDirection: TextDirection.ltr,
-          child: ColoredBox(
-            color: const Color(0xFFF6F6F6),
-            child: ValueListenableBuilder<List<FlutterMenuEntry>?>(
-              valueListenable: controller.entries,
-              builder: (context, entries, _) {
-                if (entries == null || entries.isEmpty) {
-                  return const SizedBox.expand();
-                }
-                // Align loosens the incoming tight window constraints so the
-                // panel can shrink-wrap to its content; the reporter then
-                // measures the content, which the native side uses to size
-                // the window.
-                return Align(
-                  alignment: Alignment.topLeft,
-                  child: _MenuSizeReporter(
-                    controller: controller,
-                    child: _MenuPanel(controller: controller, entries: entries),
-                  ),
-                );
-              },
-            ),
+          // No window-wide background: the window briefly spans the whole
+          // work area while the menu measures itself, and anything painted
+          // here would flash across the entire screen. The menu panel
+          // paints its own background.
+          child: ValueListenableBuilder<List<FlutterMenuEntry>?>(
+            valueListenable: controller.entries,
+            builder: (context, entries, _) {
+              if (entries == null || entries.isEmpty) {
+                return const SizedBox.expand();
+              }
+              // Align loosens the incoming tight window constraints so the
+              // panel can shrink-wrap to its content; the reporter then
+              // measures the content, which the native side uses to size
+              // the window.
+              return Align(
+                alignment: Alignment.topLeft,
+                child: _MenuPanel(controller: controller, entries: entries),
+              );
+            },
           ),
         ),
       ),
@@ -196,22 +235,47 @@ class _ContextMenuWindowRootState extends State<ContextMenuWindowRoot>
 /// which it changed, so the window can be resized and re-clamped (submenu
 /// columns grow the window to the right).
 class _MenuSizeReporter extends SingleChildRenderObjectWidget {
-  const _MenuSizeReporter({required this.controller, required super.child});
+  const _MenuSizeReporter({
+    required this.controller,
+    required this.submenuOpen,
+    required this.expandLeft,
+    required this.epoch,
+    required super.child,
+  });
 
   final ContextMenuWindowController controller;
+  final bool submenuOpen;
+  final bool expandLeft;
+  final int epoch;
 
   @override
   RenderObject createRenderObject(BuildContext context) {
-    return _RenderMenuSizeReporter(controller);
+    return _RenderMenuSizeReporter(
+        controller, submenuOpen, expandLeft, epoch);
+  }
+
+  @override
+  void updateRenderObject(
+      BuildContext context, covariant _RenderMenuSizeReporter renderObject) {
+    renderObject
+      ..controller = controller
+      ..submenuOpen = submenuOpen
+      ..expandLeft = expandLeft
+      ..epoch = epoch;
   }
 }
 
 class _RenderMenuSizeReporter extends RenderProxyBox {
-  _RenderMenuSizeReporter(this.controller);
+  _RenderMenuSizeReporter(
+      this.controller, this.submenuOpen, this.expandLeft, int epoch)
+      : _epoch = epoch;
 
-  final ContextMenuWindowController controller;
+  ContextMenuWindowController controller;
+  bool submenuOpen;
+  bool expandLeft;
   Size _lastReportedSize = Size.zero;
   double _lastReportedDpr = 0;
+  int _lastReportedEpoch = -1;
 
   /// The device pixel ratio the current frame renders at (this view's own
   /// scale, read from the render tree root at layout time).
@@ -225,6 +289,19 @@ class _RenderMenuSizeReporter extends RenderProxyBox {
     }
     return 1.0;
   }
+
+  int get epoch => _epoch;
+
+  set epoch(int value) {
+    if (_epoch != value) {
+      _epoch = value;
+      // A new open must produce a report even when the identical content
+      // would otherwise lay out to a no-op.
+      markNeedsLayout();
+    }
+  }
+
+  int _epoch;
 
   @override
   void performLayout() {
@@ -244,11 +321,18 @@ class _RenderMenuSizeReporter extends RenderProxyBox {
     final dpr = _viewDevicePixelRatio;
     if (laidOutSize.width > 0 &&
         laidOutSize.height > 0 &&
-        (laidOutSize != _lastReportedSize || dpr != _lastReportedDpr)) {
+        (laidOutSize != _lastReportedSize ||
+            dpr != _lastReportedDpr ||
+            _epoch != _lastReportedEpoch)) {
       _lastReportedSize = laidOutSize;
       _lastReportedDpr = dpr;
+      _lastReportedEpoch = _epoch;
       // Report outside layout: the channel call must never re-enter layout.
-      scheduleMicrotask(() => controller.reportSize(laidOutSize, dpr));
+      final submenuOpen = this.submenuOpen;
+      final expandLeft = this.expandLeft;
+      scheduleMicrotask(() =>
+          controller.reportSize(laidOutSize, dpr,
+              submenuOpen: submenuOpen, expandLeft: expandLeft));
     }
   }
 }
@@ -265,42 +349,121 @@ class _MenuPanel extends StatefulWidget {
   State<_MenuPanel> createState() => _MenuPanelState();
 }
 
-class _MenuPanelState extends State<_MenuPanel> {
+class _MenuPanelState extends State<_MenuPanel>
+    with SingleTickerProviderStateMixin {
   int? _openSubmenu;
+
+  late final AnimationController _openController = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 140),
+  );
+
+  /// One-shot settle pass shortly after the menu opened. The open
+  /// animation's ticker drives frames while it runs; this timer forces one
+  /// more layout/report afterwards so the window size converges even if an
+  /// early report raced the resize -- no user input needed.
+  Timer? _settleTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _openController.forward();
+    _settleTimer = Timer(const Duration(milliseconds: 350), () {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _settleTimer?.cancel();
+    _openController.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant _MenuPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(widget.entries, oldWidget.entries)) {
+      // The menu re-opened while the panel stayed mounted (native-side
+      // dismissal keeps the old tree): replay the open animation.
+      _openController.forward(from: 0);
+    }
+  }
+
+  /// Whether the open submenu column should be laid out to the LEFT of the
+  /// main column: near the right edge of the work area there is no room to
+  /// expand rightward without the window being clamped sideways.
+  bool get _expandLeft {
+    final controller = widget.controller;
+    final dpr = controller.lastDpr;
+    if (!controller.hasWorkArea || dpr <= 0) return false;
+    final spaceRightLogical = (controller.workRight - controller.anchorX) / dpr;
+    // The submenu column is roughly as wide as the main column.
+    final needed = controller.mainColumnWidth * 2.2;
+    return spaceRightLogical < needed;
+  }
 
   @override
   Widget build(BuildContext context) {
-    final columns = <Widget>[
+    final controller = widget.controller;
+    final expandLeft = _openSubmenu != null && _expandLeft;
+    final mainColumn = _MenuColumn(
+      entries: widget.entries,
+      onHoverParent: (index) {
+        if (_openSubmenu != index) setState(() => _openSubmenu = index);
+      },
+      onHoverPlainItem: () {
+        if (_openSubmenu != null) setState(() => _openSubmenu = null);
+      },
+      onSelect: controller.select,
+    );
+
+    Widget panel = Row(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (expandLeft) ..._submenuColumns(),
+        mainColumn,
+        if (!expandLeft) ..._submenuColumns(),
+      ],
+    );
+
+    // The panel paints its own surface: the window itself must stay fully
+    // transparent outside the menu (it spans the work area while the menu
+    // measures itself).
+    panel = DecoratedBox(
+      decoration: const BoxDecoration(color: Color(0xFFF6F6F6)),
+      child: FadeTransition(
+        opacity: CurvedAnimation(
+            parent: _openController, curve: Curves.easeOutCubic),
+        child: panel,
+      ),
+    );
+
+    return _MenuSizeReporter(
+      controller: controller,
+      submenuOpen: _openSubmenu != null,
+      expandLeft: expandLeft,
+      epoch: controller.showEpoch,
+      child: panel,
+    );
+  }
+
+  List<Widget> _submenuColumns() {
+    final open = _openSubmenu;
+    if (open == null || open >= widget.entries.length) return const [];
+    final children = widget.entries[open].children;
+    if (children == null || children.isEmpty) return const [];
+    return [
+      const VerticalDivider(
+          width: 1, thickness: 1, color: Color(0xFFE4E4E4)),
       _MenuColumn(
-        entries: widget.entries,
-        onHoverParent: (index) {
-          if (_openSubmenu != index) setState(() => _openSubmenu = index);
-        },
-        onHoverPlainItem: () {
-          if (_openSubmenu != null) setState(() => _openSubmenu = null);
-        },
+        entries: children,
+        onHoverParent: (_) {},
+        onHoverPlainItem: () {},
         onSelect: widget.controller.select,
       ),
     ];
-    final open = _openSubmenu;
-    if (open != null && open < widget.entries.length) {
-      final children = widget.entries[open].children;
-      if (children != null && children.isNotEmpty) {
-        columns.add(const VerticalDivider(
-            width: 1, thickness: 1, color: Color(0xFFE4E4E4)));
-        columns.add(_MenuColumn(
-          entries: children,
-          onHoverParent: (_) {},
-          onHoverPlainItem: () {},
-          onSelect: widget.controller.select,
-        ));
-      }
-    }
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: columns,
-    );
   }
 }
 

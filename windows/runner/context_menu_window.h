@@ -53,8 +53,10 @@ class ContextMenuWindow {
   // menu engine actually rendered the frame with (reported alongside the
   // logical size); the window is sized with exactly that factor so its
   // pixels map 1:1 onto the rendered content. 0 falls back to the anchor
-  // monitor's DPI.
-  void ApplySize(double logical_w, double logical_h, double dpr);
+  // monitor's DPI. |origin_offset| (logical) shifts the window origin left
+  // when the submenu expands leftward, keeping the main column anchored.
+  void ApplySize(double logical_w, double logical_h, double dpr,
+                 double origin_offset);
   void ActivateMenu();
   void Complete(const std::string& selected_id);
 
