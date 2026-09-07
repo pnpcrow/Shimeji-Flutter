@@ -22,6 +22,7 @@ import 'image/hqx/hqx_scaler.dart';
 import 'image/image_pairs.dart';
 import 'manager.dart';
 import 'mascot.dart';
+import 'native/flutter_mascot_windows.dart';
 import 'native/mascot_windows.dart';
 import 'settings.dart';
 import 'sound/sounds.dart';
@@ -609,6 +610,40 @@ class ShimejiApp {
     settings.scaling = scaling;
     await switchImageSets(settings.activeImageSets.toList(), evictAll: true);
   }
+
+  /// Settings "Rendering mode": switches between 'legacy' (per-mascot
+  /// native layered windows) and 'flutter' (per-mascot native windows each
+  /// hosting a Flutter engine). Every presentation surface of both modes is
+  /// torn down first, then all mascots respawn under the new presenter.
+  /// Decoded pose images are reused, so the switch is fast.
+  ///
+  /// While the switch is in flight the tick loop must not present mascots
+  /// ([presenterSuspended]): the engine tickers would race the teardown
+  /// with window/engine creation under the already-changed mode.
+  Future<void> switchRenderingMode(String mode) async {
+    mode = mode == 'flutter' ? 'flutter' : 'legacy';
+    if (settings.renderingMode == mode) return;
+    settings.renderingMode = mode;
+    presenterSuspended = true;
+    try {
+      // The presenter that becomes inactive stops syncing, so its windows
+      // would linger; destroy both sides' windows explicitly before the
+      // respawn recreates them under the new presenter.
+      await MascotNativeWindows.destroyAll();
+      await FlutterMascotWindows.destroyAll();
+      MascotNativeWindows.clearCache();
+      await switchImageSets(settings.activeImageSets.toList());
+      if (mode == 'flutter') {
+        await FlutterMascotWindows.prewarmContextMenu();
+      }
+    } finally {
+      presenterSuspended = false;
+    }
+  }
+
+  /// True while the rendering mode is switching: the tick loop skips
+  /// mascot presentation entirely (no windows created or destroyed).
+  bool presenterSuspended = false;
 
   void _showError(String message, [Object? error]) {
     // The Java original shows a Swing error dialog; log to the console and

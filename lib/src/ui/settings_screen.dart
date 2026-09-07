@@ -42,6 +42,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late bool multiscreen;
   late double scaling;
   late double opacity;
+  late String renderingMode;
   late String language;
   late TextEditingController interactiveWindows;
   Timer? _interactiveDebounce;
@@ -107,6 +108,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     multiscreen = settings.multiscreen;
     scaling = settings.scaling;
     opacity = settings.opacity;
+    renderingMode = settings.renderingMode;
   }
 
   /// Applies one option immediately: mutates settings, persists to disk and
@@ -124,6 +126,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() => language = tag);
     widget.app.setLanguage(tag);
     widget.app.saveSettings();
+  }
+
+  /// Switches the screen presentation mode; every mascot respawns under
+  /// the new presenter (see [ShimejiApp.switchRenderingMode]).
+  Future<void> _changeRenderingMode(String mode) async {
+    setState(() => renderingMode = mode);
+    await widget.app.switchRenderingMode(mode);
   }
 
   /// Chooser: adds/removes an image set and respawns the mascots. The
@@ -248,6 +257,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           value: opacity,
                           onChanged: (v) => setState(() => opacity = v),
                           onChangeEnd: (v) => _apply((s) => s.opacity = v),
+                        ),
+                        _section(lang.getString('RenderingMode')),
+                        DropdownButtonFormField<String>(
+                          // Re-keyed on mode switches so the field always
+                          // shows the freshly applied value.
+                          key: ValueKey('renderer-$renderingMode'),
+                          initialValue: renderingMode,
+                          isDense: true,
+                          borderRadius: BorderRadius.circular(10),
+                          items: [
+                            DropdownMenuItem(
+                              value: 'legacy',
+                              child: Text(lang.getString('RendererLegacy'),
+                                  style: _rowStyle),
+                            ),
+                            DropdownMenuItem(
+                              value: 'flutter',
+                              child: Text(lang.getString('RendererFlutter'),
+                                  style: _rowStyle),
+                            ),
+                          ],
+                          onChanged: (value) {
+                            if (value == null || value == renderingMode) {
+                              return;
+                            }
+                            _changeRenderingMode(value);
+                          },
                         ),
                         _section(lang.getString('General')),
                         _switch(lang.getString('Breeding'), breeding,

@@ -34,6 +34,8 @@ class Settings {
 
   /// The screen presentation mode. 'legacy' renders each mascot in its own
   /// per-pixel-alpha native window (the original Java architecture).
+  /// 'flutter' renders each mascot in its own native window hosting a
+  /// dedicated Flutter engine, and draws context menus with Flutter too.
   String renderingMode = 'legacy';
 
   // Window mode settings (the virtual "windowed" environment is not ported;
@@ -109,7 +111,7 @@ class Settings {
     interactiveWindowsBlacklist =
         getStringList('InteractiveWindowsBlacklist', '/');
     final mode = getProperty('RenderingMode', 'legacy').trim().toLowerCase();
-    renderingMode = mode == 'legacy' ? 'legacy' : 'legacy';
+    renderingMode = mode == 'flutter' ? 'flutter' : 'legacy';
 
     windowedMode = getProperty('Environment', 'generic') == 'virtual';
     final windowSize = getProperty('WindowSize', '600x500').split('x');

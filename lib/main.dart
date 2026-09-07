@@ -14,16 +14,32 @@ import 'package:flutter/material.dart';
 import 'package:system_tray/system_tray.dart';
 
 import 'src/app.dart';
+import 'src/flutter_renderer/context_menu_window_app.dart'
+    show runContextMenuWindowApp;
+import 'src/flutter_renderer/mascot_window_app.dart' show runMascotWindowApp;
 import 'src/manager.dart';
 import 'src/menu/context_menu_model.dart';
 import 'src/native/app_window.dart' as app_window;
+import 'src/native/flutter_mascot_windows.dart';
 import 'src/native/mascot_windows.dart';
 import 'src/ui/settings_screen.dart';
 
 final ValueNotifier<bool> settingsOpen = ValueNotifier<bool>(false);
 
-Future<void> main() async {
+Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Secondary engines run the same entry point with a leading mode argument:
+  // per-mascot render windows and the Flutter context-menu window of the
+  // "flutter" renderer mode. Each hosts its own Flutter engine.
+  if (args.isNotEmpty) {
+    if (args.first == 'mascot_window') {
+      return runMascotWindowApp(args.length > 1 ? args[1] : '');
+    }
+    if (args.first == 'context_menu') {
+      return runContextMenuWindowApp();
+    }
+  }
 
   // The engine is headless; the widget tree hosts the optional settings
   // screen inside the (normally hidden) host window.
@@ -68,22 +84,22 @@ Future<void> _runEngine() async {
     mascot.animating = false;
     try {
       final entries = buildContextMenu(app, mascot);
-      // ignore: avoid_print
-      print('MENU ids built: '
-          '${[for (final e in entries) e.id]}');
-      // ignore: avoid_print
-      print('MENU action keys: ${mascot.contextMenuActions.keys.toList()}');
-      final selectedId = await MascotNativeWindows.showContextMenu(
-        id: mascot.id,
-        x: physicalX,
-        y: physicalY,
-        items: entries,
-      );
-      // ignore: avoid_print
-      print('MENU selected id: "$selectedId"');
+      // The renderer mode picks the presentation: the legacy native Win32
+      // popup, or the Flutter-rendered menu window.
+      final selectedId = app.settings.renderingMode == 'flutter'
+          ? await FlutterMascotWindows.showContextMenu(
+              id: mascot.id,
+              x: physicalX,
+              y: physicalY,
+              items: entries,
+            )
+          : await MascotNativeWindows.showContextMenu(
+              id: mascot.id,
+              x: physicalX,
+              y: physicalY,
+              items: entries,
+            );
       final action = mascot.contextMenuActionFor(selectedId);
-      // ignore: avoid_print
-      print('MENU action resolved: ${action != null}');
       if (action != null) {
         action();
       }
@@ -93,6 +109,7 @@ Future<void> _runEngine() async {
     }
   };
   app.onAppExit = () async {
+    await FlutterMascotWindows.destroyAll();
     await MascotNativeWindows.destroyAll();
     exit(0);
   };
@@ -114,6 +131,12 @@ Future<void> _runEngine() async {
   // Slow phase: parse configurations, decode poses, spawn mascots.
   await app.loadConfigurationsAndSpawn();
 
+  // The Flutter context-menu window hosts its own engine; boot it now so
+  // the first right-click opens without engine start-up latency.
+  if (app.settings.renderingMode == 'flutter') {
+    unawaited(FlutterMascotWindows.prewarmContextMenu());
+  }
+
   // Any settings change anywhere (settings screen, mascot context menu)
   // broadcasts through the notifier; the tray menu rebuilds itself here so
   // labels and checkmarks can never drift out of sync.
@@ -129,15 +152,18 @@ Future<void> _runEngine() async {
   // selection round-trip (Dart -> native popup -> id -> action) can be
   // exercised without relying on input polling.
   if (Platform.environment['SHIMEJI_TEST_MENU'] == '1') {
-    final mascot =
-        app.manager.mascots.isNotEmpty ? app.manager.mascots.first : null;
-    if (mascot != null) {
-      Future.delayed(const Duration(seconds: 3), () {
+    Future.delayed(const Duration(seconds: 3), () {
+      // The check runs inside the callback: at this point in start-up the
+      // freshly spawned mascots are still pending in the manager (moved to
+      // the live list by the first tick), so checking earlier finds none.
+      final mascot =
+          app.manager.mascots.isNotEmpty ? app.manager.mascots.first : null;
+      if (mascot != null) {
         // ignore: avoid_print
         print('TESTMENU opening at 400,400');
         app.onShowContextMenu!(mascot, 400, 400);
-      });
-    }
+      }
+    });
   }
 
   Timer.periodic(const Duration(milliseconds: Manager.tickInterval), (_) {
@@ -163,7 +189,10 @@ void _tick(ShimejiApp app) {
     }
     app.pollInput();
     app.manager.tick();
-    unawaited(MascotNativeWindows.syncMascots([
+    // While the rendering mode is switching, no presentation at all: the
+    // teardown and respawn must not race window/engine creation.
+    if (app.presenterSuspended) return;
+    final states = [
       for (final mascot in app.manager.mascots)
         MascotSyncState(
           id: mascot.id,
@@ -177,7 +206,13 @@ void _tick(ShimejiApp app) {
           height: mascot.bounds.height,
           opacity: app.settings.opacity,
         ),
-    ]));
+    ];
+    // Both presenters share the same sync signature; the renderer mode
+    // picks which per-mascot windows actually present the mascots.
+    final sync = app.settings.renderingMode == 'flutter'
+        ? FlutterMascotWindows.syncMascots
+        : MascotNativeWindows.syncMascots;
+    unawaited(sync(states));
   } catch (e) {
     // Never kill the ticker; surface failures in debug consoles.
     // ignore: avoid_print

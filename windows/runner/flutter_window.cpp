@@ -5,6 +5,8 @@
 #include <optional>
 
 #include "flutter/generated_plugin_registrant.h"
+#include "context_menu_window.h"
+#include "flutter_mascot_windows.h"
 #include "mascot_windows.h"
 
 namespace {
@@ -61,6 +63,12 @@ void ReadBoolField(const EncodableMap& map, const char* key, bool* out) {
   }
 }
 
+bool GetBool(const EncodableMap& map, const char* key, bool fallback) {
+  bool value = fallback;
+  ReadBoolField(map, key, &value);
+  return value;
+}
+
 int32_t GetInt(const EncodableMap& map, const char* key) {
   auto it = map.find(EncodableValue(key));
   if (it == map.end()) {
@@ -73,6 +81,45 @@ int32_t GetInt(const EncodableMap& map, const char* key) {
     return static_cast<int32_t>(*value);
   }
   return 0;
+}
+
+int64_t GetInt64(const EncodableMap& map, const char* key) {
+  auto it = map.find(EncodableValue(key));
+  if (it == map.end()) {
+    return 0;
+  }
+  if (const auto* value = std::get_if<int64_t>(&it->second)) {
+    return *value;
+  }
+  if (const auto* value = std::get_if<int32_t>(&it->second)) {
+    return *value;
+  }
+  return 0;
+}
+
+double GetDouble(const EncodableMap& map, const char* key, double fallback) {
+  auto it = map.find(EncodableValue(key));
+  if (it == map.end()) {
+    return fallback;
+  }
+  if (const auto* value = std::get_if<double>(&it->second)) {
+    return *value;
+  }
+  if (const auto* value = std::get_if<int32_t>(&it->second)) {
+    return static_cast<double>(*value);
+  }
+  if (const auto* value = std::get_if<int64_t>(&it->second)) {
+    return static_cast<double>(*value);
+  }
+  return fallback;
+}
+
+// The Dart side tags every presenter call with its renderer mode; anything
+// else (including a missing field) falls back to the legacy presenter.
+bool IsFlutterRenderer(const EncodableMap& map) {
+  std::string renderer;
+  ReadStringField(map, "renderer", &renderer);
+  return renderer == "flutter";
 }
 
 MascotMenuItem ParseMenuItem(const EncodableMap& map) {
@@ -151,7 +198,12 @@ void FlutterWindow::RegisterMascotChannel() {
         }
 
         if (method_name == "createMascotWindow") {
-          MascotWindows::Instance().Create(GetInt(map, "id"));
+          int id = GetInt(map, "id");
+          if (IsFlutterRenderer(map)) {
+            FlutterMascotWindows::Instance().Create(id);
+          } else {
+            MascotWindows::Instance().Create(id);
+          }
           result->Success();
           return;
         }
@@ -163,26 +215,44 @@ void FlutterWindow::RegisterMascotChannel() {
           int h = GetInt(map, "h");
           const uint8_t* bytes = nullptr;
           size_t byte_count = 0;
+          const std::vector<uint8_t>* rgba = nullptr;
           auto bytes_it = map.find(EncodableValue("bytes"));
           if (bytes_it != map.end()) {
             if (const auto* list =
                     std::get_if<std::vector<uint8_t>>(&bytes_it->second)) {
               bytes = list->data();
               byte_count = list->size();
+              rgba = list;
             }
           }
-          bool ok = MascotWindows::Instance().Update(id, x, y, w, h, bytes,
-                                                     byte_count);
+          bool ok = false;
+          if (IsFlutterRenderer(map)) {
+            // The flutter presenter omits 'bytes' on pure movement updates.
+            ok = FlutterMascotWindows::Instance().Update(
+                id, x, y, w, h, rgba, GetBool(map, "flipped", false),
+                GetDouble(map, "opacity", 1.0), GetInt64(map, "hash"));
+          } else {
+            ok = MascotWindows::Instance().Update(id, x, y, w, h, bytes,
+                                                  byte_count);
+          }
           result->Success(EncodableValue(ok));
           return;
         }
         if (method_name == "destroyMascotWindow") {
-          MascotWindows::Instance().Destroy(GetInt(map, "id"));
+          int id = GetInt(map, "id");
+          MascotWindows::Instance().Destroy(id);
+          FlutterMascotWindows::Instance().Destroy(id);
           result->Success();
           return;
         }
         if (method_name == "destroyAllMascotWindows") {
           MascotWindows::Instance().DestroyAll();
+          FlutterMascotWindows::Instance().DestroyAll();
+          result->Success();
+          return;
+        }
+        if (method_name == "prewarmContextMenu") {
+          ContextMenuWindow::Instance().EnsureCreated();
           result->Success();
           return;
         }
@@ -209,15 +279,37 @@ void FlutterWindow::RegisterMascotChannel() {
           int id = GetInt(map, "id");
           int x = GetInt(map, "x");
           int y = GetInt(map, "y");
-          std::vector<MascotMenuItem> items;
+          const EncodableList* raw_items = nullptr;
           auto items_it = map.find(EncodableValue("items"));
           if (items_it != map.end()) {
             if (const auto* list =
                     std::get_if<EncodableList>(&items_it->second)) {
-              for (const EncodableValue& entry : *list) {
-                if (const auto* item = std::get_if<EncodableMap>(&entry)) {
-                  items.push_back(ParseMenuItem(*item));
-                }
+              raw_items = list;
+            }
+          }
+          if (IsFlutterRenderer(map)) {
+            // The Flutter menu window completes asynchronously (selection
+            // or focus loss); keep the pending result alive until then and
+            // forward the encoded entry tree verbatim.
+            EncodableList items_copy =
+                raw_items != nullptr ? *raw_items : EncodableList();
+            auto keeper = std::make_shared<
+                std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>>(
+                std::move(result));
+            ContextMenuWindow::Instance().Show(
+                items_copy, x, y, [keeper](const std::string& selected) {
+                  if (*keeper) {
+                    (*keeper)->Success(EncodableValue(selected));
+                    keeper->reset();
+                  }
+                });
+            return;
+          }
+          std::vector<MascotMenuItem> items;
+          if (raw_items != nullptr) {
+            for (const EncodableValue& entry : *raw_items) {
+              if (const auto* item = std::get_if<EncodableMap>(&entry)) {
+                items.push_back(ParseMenuItem(*item));
               }
             }
           }
@@ -296,6 +388,8 @@ void FlutterWindow::HideSettingsWindow() {
 
 void FlutterWindow::OnDestroy() {
   MascotWindows::Instance().DestroyAll();
+  FlutterMascotWindows::Instance().DestroyAll();
+  ContextMenuWindow::Instance().Destroy();
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }
