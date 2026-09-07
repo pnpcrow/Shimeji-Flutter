@@ -49,7 +49,12 @@ class ContextMenuWindow {
   static void EnsureClass();
 
   void SendShow(const flutter::EncodableList& items);
-  void ApplySize(double logical_w, double logical_h);
+  // Sizes/positions the window for the menu content. |dpr| is the scale the
+  // menu engine actually rendered the frame with (reported alongside the
+  // logical size); the window is sized with exactly that factor so its
+  // pixels map 1:1 onto the rendered content. 0 falls back to the anchor
+  // monitor's DPI.
+  void ApplySize(double logical_w, double logical_h, double dpr);
   void ActivateMenu();
   void Complete(const std::string& selected_id);
 

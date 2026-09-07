@@ -3,6 +3,7 @@
 #include <dwmapi.h>
 
 #include <algorithm>
+#include <optional>
 
 namespace {
 
@@ -108,12 +109,23 @@ LRESULT CALLBACK ContextMenuWindow::WndProc(HWND window, UINT message,
                    HIWORD(lparam), TRUE);
       }
       return 0;
-    case WM_DPICHANGED:
-      return 0;  // sizes are always re-derived from the menu engine
     case WM_ERASEBKGND:
       return 1;
     case WM_DESTROY:
       return 0;
+  }
+  // Give the Flutter engine a chance to see top-level messages. WM_DPICHANGED
+  // in particular MUST reach the engine (the view is a child window and only
+  // learns about scale changes through this forwarding, like in the template
+  // host window); without it the DPR goes stale/wrong when the menu opens on
+  // another monitor and the window ends up sized with the wrong scale.
+  if (menu != nullptr && menu->controller_ != nullptr) {
+    std::optional<LRESULT> engine_result =
+        menu->controller_->HandleTopLevelWindowProc(window, message, wparam,
+                                                    lparam);
+    if (engine_result) {
+      return *engine_result;
+    }
   }
   return DefWindowProc(window, message, wparam, lparam);
 }
@@ -192,7 +204,8 @@ void ContextMenuWindow::EnsureCreated() {
           }
         } else if (method == "setMenuSize") {
           if (menu_active_) {
-            ApplySize(number_field("w"), number_field("h"));
+            ApplySize(number_field("w"), number_field("h"),
+                      number_field("dpr"));
           }
         } else if (method == "selected") {
           std::string id;
@@ -273,16 +286,20 @@ void ContextMenuWindow::SendShow(const flutter::EncodableList& items) {
       "show", std::make_unique<flutter::EncodableValue>(args));
 }
 
-void ContextMenuWindow::ApplySize(double logical_w, double logical_h) {
+void ContextMenuWindow::ApplySize(double logical_w, double logical_h,
+                                  double dpr) {
   if (hwnd_ == nullptr || logical_w <= 0 || logical_h <= 0) {
     return;
   }
-  // The DPI of the monitor the menu is being placed on; the window itself
-  // may still report the DPI of its previous (possibly hidden) position.
+  // The menu engine reports the exact scale it rendered with; a freshly
+  // shown window can still carry the DPI of its previous (idle) position,
+  // so the anchor monitor's DPI is only the fallback.
   POINT anchor{anchor_x_, anchor_y_};
-  UINT dpi = DpiAtPoint(anchor, hwnd_);
-  int w = static_cast<int>(logical_w * dpi / 96.0);
-  int h = static_cast<int>(logical_h * dpi / 96.0);
+  double scale = dpr > 0
+                     ? dpr
+                     : DpiAtPoint(anchor, hwnd_) / 96.0;
+  int w = static_cast<int>(logical_w * scale + 0.5);
+  int h = static_cast<int>(logical_h * scale + 0.5);
 
   // Clamp against the work area of the monitor containing the anchor.
   HMONITOR monitor = MonitorFromPoint(anchor, MONITOR_DEFAULTTONEAREST);

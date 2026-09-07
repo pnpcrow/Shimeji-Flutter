@@ -16,7 +16,8 @@ library;
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart' show RenderProxyBox;
+import 'package:flutter/rendering.dart'
+    show RenderProxyBox, RenderView;
 import 'package:flutter/services.dart';
 
 class FlutterMenuEntry {
@@ -104,21 +105,56 @@ class ContextMenuWindowController {
     _channel.invokeMethod('selected', {'id': id}).catchError((_) {});
   }
 
-  void reportSize(Size logicalSize) {
+  /// Reports the laid-out content size (logical) together with the device
+  /// pixel ratio the frame was laid out at. The native side sizes the
+  /// window with exactly that ratio, so window pixels map 1:1 onto what
+  /// the engine rendered -- regardless of which monitor the window idled
+  /// on before, or whether its metrics were still settling when the menu
+  /// content first arrived.
+  void reportSize(Size logicalSize, double devicePixelRatio) {
     _channel.invokeMethod('setMenuSize', {
       'w': logicalSize.width,
       'h': logicalSize.height,
+      'dpr': devicePixelRatio,
     }).catchError((_) {});
   }
 }
 
-class ContextMenuWindowRoot extends StatelessWidget {
+class ContextMenuWindowRoot extends StatefulWidget {
   const ContextMenuWindowRoot({super.key, required this.controller});
 
   final ContextMenuWindowController controller;
 
   @override
+  State<ContextMenuWindowRoot> createState() => _ContextMenuWindowRootState();
+}
+
+class _ContextMenuWindowRootState extends State<ContextMenuWindowRoot>
+    with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeMetrics() {
+    // The window was moved/resized natively and the view's scale changed
+    // (e.g. the freshly shown window still carried the DPI of its previous
+    // position): lay out again at the settled device pixel ratio and
+    // re-report the menu size so the native side re-fits the window.
+    setState(() {});
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final controller = widget.controller;
     return CallbackShortcuts(
       bindings: {
         const SingleActivator(LogicalKeyboardKey.escape):
@@ -174,18 +210,45 @@ class _RenderMenuSizeReporter extends RenderProxyBox {
   _RenderMenuSizeReporter(this.controller);
 
   final ContextMenuWindowController controller;
-  Size _lastReported = Size.zero;
+  Size _lastReportedSize = Size.zero;
+  double _lastReportedDpr = 0;
+
+  /// The device pixel ratio the current frame renders at (this view's own
+  /// scale, read from the render tree root at layout time).
+  double get _viewDevicePixelRatio {
+    RenderObject? node = parent;
+    while (node != null) {
+      if (node is RenderView) {
+        return node.configuration.devicePixelRatio;
+      }
+      node = node.parent;
+    }
+    return 1.0;
+  }
 
   @override
   void performLayout() {
-    super.performLayout();
+    // Lay the menu out UNCONSTRAINED: once the window has shrunk to the
+    // menu, the incoming max constraints equal the window size and would
+    // clamp a submenu column expansion (the row could never grow beyond
+    // the current window, so the window could never widen). The natural
+    // size may overflow the window for one frame until the native side
+    // applies the reported size.
+    if (child != null) {
+      child!.layout(const BoxConstraints(), parentUsesSize: true);
+      size = child!.size;
+    } else {
+      size = constraints.smallest;
+    }
     final laidOutSize = size;
-    if (laidOutSize != _lastReported &&
-        laidOutSize.width > 0 &&
-        laidOutSize.height > 0) {
-      _lastReported = laidOutSize;
+    final dpr = _viewDevicePixelRatio;
+    if (laidOutSize.width > 0 &&
+        laidOutSize.height > 0 &&
+        (laidOutSize != _lastReportedSize || dpr != _lastReportedDpr)) {
+      _lastReportedSize = laidOutSize;
+      _lastReportedDpr = dpr;
       // Report outside layout: the channel call must never re-enter layout.
-      scheduleMicrotask(() => controller.reportSize(laidOutSize));
+      scheduleMicrotask(() => controller.reportSize(laidOutSize, dpr));
     }
   }
 }

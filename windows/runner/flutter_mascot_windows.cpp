@@ -2,6 +2,7 @@
 
 #include <dwmapi.h>
 #include <windowsx.h>
+#include <optional>
 
 namespace {
 
@@ -75,14 +76,24 @@ LRESULT CALLBACK FlutterMascotWindows::WndProc(HWND window, UINT message,
                    HIWORD(lparam), FALSE);
       }
       return 0;
-    case WM_DPICHANGED:
-      // Geometry is owned by the main engine in physical pixels; the sprite
-      // must stay exactly pose-sized, so the suggested rescale is ignored.
-      return 0;
     case WM_ERASEBKGND:
       return 1;
     case WM_DESTROY:
       return 0;
+  }
+  // Give the Flutter engine a chance to see top-level messages. WM_DPICHANGED
+  // in particular MUST reach the engine (the view is a child window and only
+  // learns about scale changes through this forwarding); the engine then
+  // re-renders at the new DPR while the window geometry stays owned by the
+  // main engine in physical pixels (RawImage stretches to the exact window
+  // size either way).
+  if (mascot != nullptr && mascot->controller != nullptr) {
+    std::optional<LRESULT> engine_result =
+        mascot->controller->HandleTopLevelWindowProc(window, message, wparam,
+                                                     lparam);
+    if (engine_result) {
+      return *engine_result;
+    }
   }
   return DefWindowProc(window, message, wparam, lparam);
 }
